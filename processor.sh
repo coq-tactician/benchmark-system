@@ -37,7 +37,7 @@ end_script() {
         echo "Copy bench files"
         # Note the training slash
         # Taken from https://stackoverflow.com/a/32527277
-        time rsync -zar  --prune-empty-dirs --include "*/" \
+        time rsync -ar  --prune-empty-dirs --include "*/" \
              --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR
 
     } 3<${DIR}.lock
