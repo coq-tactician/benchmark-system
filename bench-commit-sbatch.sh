@@ -9,7 +9,9 @@ then
     exit 1
 fi
 
-DATAREPO=/home/blaaulas/tactician/benchmark-data
+# Create global workspace
+GLOBALDIR=$(mktemp --directory --tmpdir=/home/blaaulas/tactician/builds XXXXXXXX)
+
 COMPILECPUS=8
 SQUEUE=10
 
@@ -17,20 +19,15 @@ REPO=${1}; shift
 COMMIT=${1}; shift
 PACKAGES=${1}; shift
 
-PARAMSTR=$(echo $* | tr ' ' '-' | tr '=' '-')
-DATA=$DATAREPO/$COMMIT/$PARAMSTR
-
 SCRIPT=$(realpath $0)
 SCRIPTPATH=$(dirname $SCRIPT)
 PATH=$SCRIPTPATH:$PATH
 export PATH
 
-mkdir -p "$DATA"
-
-sbatch --job-name=tb.${COMMIT}${PARAMSTR} --cpus-per-task=1 --parsable \
-       --time=06:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
+sbatch --job-name=tb.$(basename $GLOBALDIR) --cpus-per-task=1 \
+       --time=06:00:00 --mem-per-cpu=100 --partition compute --ntasks=1 \
        --open-mode=append --parsable \
-       --output="$DATA"/output.log \
-       --error="$DATA"/error.log \
-       srun-command.sh benchmark-supervisor.sh "$DATA" "$COMPILECPUS" "$SQUEUE" \
+       --output="$GLOBALDIR"/output.log \
+       --error="$GLOBALDIR"/error.log \
+       srun-command.sh benchmark-supervisor.sh "$GLOBALDIR" "$COMPILECPUS" "$SQUEUE" \
         "$REPO" "$COMMIT" "$PACKAGES" "$@"

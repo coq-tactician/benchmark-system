@@ -4,11 +4,11 @@ set -eu
 
 if [ $# -lt 5 ]
 then
-    echo "Usage: benchmark-supervisor.sh data-dir #cpus #squeue repo commit packages [settings..]"
+    echo "Usage: benchmark-supervisor.sh global-dir #cpus #squeue repo commit packages [settings..]"
     exit 1
 fi
 
-DATA=${1}; shift
+GLOBALDIR=${1}; shift
 CPUS=${1}; shift
 SQUEUE=${1}; shift
 REPO=${1}; shift
@@ -16,13 +16,10 @@ COMMIT=${1}; shift
 PACKAGES=${1}; shift
 
 echo "Benchmarking packages $PACKAGES using commit ${REPO}#${COMMIT} with parameters $@"
+echo "Workspace directory: ${GLOBALDIR}"
 
 module use ~/.local/easybuild/modules/all
 module load git git-lfs bubblewrap OCaml parallel
-
-# Create global workspace
-GLOBALDIR=$(mktemp --directory --tmpdir=/home/blaaulas/tactician/builds XXXXXXXX)
-echo "Workspace directory: ${GLOBALDIR}"
 
 # Determine local build directory name, and the directory to copy from
 DIR=$(mktemp --directory -t tactician-XXXXXX)
@@ -46,8 +43,8 @@ touch queue.lock
 ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" \
          --time=06:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
          --open-mode=append --parsable \
-         --output="$GLOBALDIR"/output.log \
-         --error="$GLOBALDIR"/error.log \
+         --output="$GLOBALDIR"/initial-compile-output.log \
+         --error="$GLOBALDIR"/initial-compile-error.log \
          srun-command.sh compile-task.sh "$DIR" "$GLOBALDIR" "$COPYDIR" \
          "$CPUS" "$REPO" "$COMMIT" "$PACKAGES" "$@")
 touch "$GLOBALDIR"/processors/"$ID"
@@ -78,11 +75,15 @@ echo "Processing done"
 echo "Collecting results"
 
 # Create data directory
+PARAMSTR=$(echo $* | tr ' ' '-' | tr '=' '-')
+DATAREPO=/home/blaaulas/tactician/benchmark-data
+DATA=$DATAREPO/$COMMIT/$PARAMSTR
 mkdir -p $DATA
 echo "Data directory: $DATA"
 
 # Collect results
 find $GLOBALDIR/_opam/.opam-switch/build -name '*.bench' | xargs cat > $DATA/combined.bench
+cp $GLOBALDIR/*.log $DATA
 
 # Add and push collected files (also includes log files)
 cd $DATA

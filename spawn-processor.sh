@@ -20,11 +20,11 @@ do
         if [ "$AVAILABLE" -gt 0 ] && [ -s "$GLOBALDIR"/queue ]
         then
             #Spawn a job
-            ID=$(sbatch --job-name=pr.$(basename $DIR) --cpus-per-task=1 \
+            ID=$(sbatch --job-name=pr.$(basename $GLOBALDIR) --cpus-per-task=1 \
                    --time=03:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
                    --open-mode=append --parsable \
-                   --output="$GLOBALDIR"/output.log \
-                   --error="$GLOBALDIR"/error.log \
+                   --output="$GLOBALDIR"/processors-output.log \
+                   --error="$GLOBALDIR"/processors-error.log \
                    srun-command.sh processor.sh "$DIR" "$GLOBALDIR" "$COPYDIR")
             touch "$GLOBALDIR"/processors/"$ID"
 

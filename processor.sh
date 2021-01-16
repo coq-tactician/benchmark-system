@@ -29,8 +29,18 @@ COQOUT=$(mktemp)
 COQERR=$(mktemp)
 
 end_script() {
-    spawn-processor.sh "$DIR" "$GLOBALDIR" "COPYDIR"
     rm "$GLOBALDIR"/processors/"$SLURM_JOB_ID"
+    spawn-processor.sh "$DIR" "$GLOBALDIR" "COPYDIR"
+    # Copy generated bench files to the global working directory
+    {
+        flock -x 3
+        echo "Copy bench files"
+        # Note the training slash
+        # Taken from https://stackoverflow.com/a/32527277
+        time rsync -zar  --prune-empty-dirs --include "*/" \
+             --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR
+
+    } 3<${DIR}.lock
     {
         flock -x 3
         cat $COQOUT >> "$GLOBALDIR"/coq-out.log
@@ -60,7 +70,7 @@ do
         flock -x 3
         echo "Copy from $COPYDIR"
         # Note the training slash
-        rsync -az $COPYDIR/ $DIR
+        time rsync -az $COPYDIR/ $DIR
 
     } 3<${DIR}.lock
 
@@ -69,7 +79,7 @@ do
 
     # Execute command
     [ -z "$CMD" ] && exit 0
-    echo "$CMD" >> "$COQOUT"
+    echo "$CMD"
     eval "$CMD" 2>> "$COQERR" >> "$COQOUT"
     {
         flock -x 3
