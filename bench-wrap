@@ -1,0 +1,50 @@
+#!/bin/bash
+
+set -eu
+
+if [ $# -lt 5 ]
+then
+    echo "Usage: bench-wrap.sh dir global-dir copy-dir param-file coqc [coqc-param..]"
+    exit 1
+fi
+
+# WARNING: This script is not allowed to produce any output in order to be compatible with Coq
+
+DIR=${1}; shift
+GLOBALDIR=${1}; shift
+COPYDIR=${1}; shift
+PARAMS=${1}; shift
+COQC=${1}; shift
+
+"$COQC" "$@"
+
+# Don't fill queue if there are no benchmark params
+[ ! -s "$PARAMS" ] && exit 0
+
+WRAPPER="bwrap --dev-bind / / --die-with-parent"
+COUNT=0
+for ARG in "$@"
+do
+    if [ -f "$ARG" ]; then
+        # Very rough lemma count estimate
+        LEMMAS=$(grep -o 'Lemma\|Theorem\|Fact\|Remark\|Corollary\|Proposition\|Property' "$ARG" | wc -l)
+        COUNT=$(($COUNT + $LEMMAS))
+    fi
+    if [ -f "$ARG"o ]; then
+        ARG=$(readlink -f "$ARG"o)
+        BASE="${ARG%.*}"
+        touch "$BASE".bench.vo
+        WRAPPER+=" --bind "$BASE".bench.vo "$BASE".vo"
+    fi
+done
+
+# Fill the queue
+{
+    flock -x 3
+    # Don't use the original coqc command, because it is inoperative outside this environment
+    echo "$COUNT"$'\t'"(cd $(pwd) && $WRAPPER coqc" "$@" "-l $PARAMS)" >> "$GLOBALDIR"/queue
+    sort -k1 -n -r -o "$GLOBALDIR"/queue "$GLOBALDIR"/queue
+    echo "$COUNT"$'\t'"(cd $(pwd) && $WRAPPER coqc" "$@" "-l $PARAMS)" >> "$GLOBALDIR"/all-jobs
+} 3<"$GLOBALDIR"/queue.lock
+
+spawn-processor.sh "$DIR" "$GLOBALDIR" "$COPYDIR"
