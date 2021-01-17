@@ -13,7 +13,6 @@ fi
 GLOBALDIR=$(mktemp --directory --tmpdir=/home/blaaulas/tactician/builds XXXXXXXX)
 
 COMPILECPUS=8
-SQUEUE=10
 
 REPO=${1}; shift
 COMMIT=${1}; shift
@@ -29,5 +28,5 @@ sbatch --job-name=tb.$(basename $GLOBALDIR) --cpus-per-task=1 \
        --open-mode=append --parsable \
        --output="$GLOBALDIR"/output.log \
        --error="$GLOBALDIR"/error.log \
-       srun-command.sh benchmark-supervisor.sh "$GLOBALDIR" "$COMPILECPUS" "$SQUEUE" \
+       srun-command.sh benchmark-supervisor.sh "$GLOBALDIR" "$COMPILECPUS" \
         "$REPO" "$COMMIT" "$PACKAGES" "$@"

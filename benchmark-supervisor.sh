@@ -4,13 +4,12 @@ set -eu
 
 if [ $# -lt 5 ]
 then
-    echo "Usage: benchmark-supervisor.sh global-dir #cpus #squeue repo commit packages [settings..]"
+    echo "Usage: benchmark-supervisor.sh global-dir #cpus repo commit packages [settings..]"
     exit 1
 fi
 
 GLOBALDIR=${1}; shift
 CPUS=${1}; shift
-SQUEUE=${1}; shift
 REPO=${1}; shift
 COMMIT=${1}; shift
 PACKAGES=${1}; shift
@@ -23,16 +22,13 @@ module load git git-lfs bubblewrap OCaml parallel
 
 # Determine local build directory name, and the directory to copy from
 DIR=$(mktemp --directory -t tactician-XXXXXX)
-COPYDIR=$(mktemp --directory -t tactician-XXXXXX)
 echo "Local build directories: ${DIR}"
-echo "Copy directory: ${COPYDIR}"
 
 # Set up data for managing slurm queue
 cd $GLOBALDIR
-echo "$SQUEUE" > squeue-free
-touch squeue-free.lock
 touch coq-log.lock
 mkdir processors
+mkdir processor-logs
 touch all-jobs
 touch finished-jobs
 touch finished-jobs.lock
@@ -45,17 +41,19 @@ ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" \
          --open-mode=append --parsable \
          --output="$GLOBALDIR"/initial-compile-output.log \
          --error="$GLOBALDIR"/initial-compile-error.log \
-         srun-command.sh compile-task.sh "$DIR" "$GLOBALDIR" "$COPYDIR" \
+         srun-command.sh compile-task.sh "$DIR" "$GLOBALDIR" \
          "$CPUS" "$REPO" "$COMMIT" "$PACKAGES" "$@")
 touch "$GLOBALDIR"/processors/"$ID"
 
 while true
 do
-    AVAILABLE=$(cat "$GLOBALDIR"/squeue-free)
     RUNNING=$(ls "$GLOBALDIR"/processors | wc -l)
-    if [ ! "$AVAILABLE" -eq "$SQUEUE" ] || [ -s "$GLOBALDIR"/queue ] || [ "$RUNNING" -gt 0 ]
+    if [ -s "$GLOBALDIR"/queue ] || [ "$RUNNING" -gt 0 ]
     then
-        spawn-processor.sh "$DIR" "$GLOBALDIR" "$COPYDIR"
+        #only spawn new processors when the copy-dir is known
+        [ -f $GLOBALDIR/copy-dir ] && spawn-processor.sh "$DIR" "$GLOBALDIR"
+
+        # Calculate progress
         {
             flock -x 3
             TOTAL=$(cat "$GLOBALDIR"/all-jobs | cut -f1 | cat - <(printf 0) | paste -s -d+ - | bc)

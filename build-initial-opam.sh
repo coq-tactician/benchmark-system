@@ -2,15 +2,14 @@
 
 set -eu
 
-if [ $# -lt 7 ]
+if [ $# -lt 6 ]
 then
-    echo "Usage: build-initial-opam.sh dir global-dir copy-dir #cpus repo commit packages [settings..]"
+    echo "Usage: build-initial-opam.sh dir global-dir #cpus repo commit packages [settings..]"
     exit 1
 fi
 
 DIR=${1}; shift
 GLOBALDIR=${1}; shift
-COPYDIR=${1}; shift
 CPUS=${1}; shift
 REPO=${1}; shift
 COMMIT=${1}; shift
@@ -50,7 +49,7 @@ cat <<EOF > $DIR/_opam/.opam-switch/config/coq-tactician.config
 #!/bin/bash
 opam-version: "2.0"
 variables {
-    injection-wrappers: "bench-wrap $DIR $GLOBALDIR $COPYDIR $PARAMS"
+    injection-wrappers: "bench-wrap $DIR $GLOBALDIR $PARAMS"
     injection-flags: ""
 }
 EOF

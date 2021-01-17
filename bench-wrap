@@ -2,9 +2,9 @@
 
 set -eu
 
-if [ $# -lt 5 ]
+if [ $# -lt 4 ]
 then
-    echo "Usage: bench-wrap.sh dir global-dir copy-dir param-file coqc [coqc-param..]"
+    echo "Usage: bench-wrap.sh dir global-dir param-file coqc [coqc-param..]"
     exit 1
 fi
 
@@ -12,7 +12,6 @@ fi
 
 DIR=${1}; shift
 GLOBALDIR=${1}; shift
-COPYDIR=${1}; shift
 PARAMS=${1}; shift
 COQC=${1}; shift
 
@@ -47,4 +46,4 @@ done
     echo "$COUNT"$'\t'"(cd $(pwd) && $WRAPPER coqc" "$@" "-l $PARAMS)" >> "$GLOBALDIR"/all-jobs
 } 3<"$GLOBALDIR"/queue.lock
 
-spawn-processor.sh "$DIR" "$GLOBALDIR" "$COPYDIR"
+spawn-processor.sh "$DIR" "$GLOBALDIR"

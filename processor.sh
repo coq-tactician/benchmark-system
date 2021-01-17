@@ -2,9 +2,9 @@
 
 set -eu
 
-if [ $# -lt 3 ]
+if [ $# -lt 2 ]
 then
-    echo "Usage: processor.sh dir global-dir copy-dir"
+    echo "Usage: processor.sh dir global-dir"
     exit 1
 fi
 
@@ -12,15 +12,16 @@ MAX_TIME=3600
 
 DIR=${1}; shift
 GLOBALDIR=${1}; shift
-COPYDIR=${1}; shift
+
+COPYDIR=$(cat $GLOBALDIR/copy-dir)
 
 # This processor is no longer in queue, thus we can increase squeue-free
 {
     flock -x 3
-    AVAILABLE=$(cat "$GLOBALDIR"/squeue-free)
+    AVAILABLE=$(cat ~/tactician/squeue-free)
     AVAILABLE=$(($AVAILABLE + 1))
-    echo $AVAILABLE > "$GLOBALDIR"/squeue-free
-} 3<"$GLOBALDIR"/squeue-free.lock
+    echo $AVAILABLE > ~/tactician/squeue-free
+} 3< ~/tactician/squeue-free.lock
 
 # Create dir lockfile if not exists
 touch ${DIR}.lock
@@ -29,8 +30,7 @@ COQOUT=$(mktemp)
 COQERR=$(mktemp)
 
 end_script() {
-    rm "$GLOBALDIR"/processors/"$SLURM_JOB_ID"
-    spawn-processor.sh "$DIR" "$GLOBALDIR" "COPYDIR"
+    spawn-processor.sh "$DIR" "$GLOBALDIR"
     # Copy generated bench files to the global working directory
     {
         flock -x 3
@@ -38,7 +38,7 @@ end_script() {
         # Note the training slash
         # Taken from https://stackoverflow.com/a/32527277
         time rsync -ar  --prune-empty-dirs --include "*/" \
-             --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR
+             --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR 2>&1
 
     } 3<${DIR}.lock
     {
@@ -46,6 +46,7 @@ end_script() {
         cat $COQOUT >> "$GLOBALDIR"/coq-out.log
         cat $COQERR >> "$GLOBALDIR"/coq-err.log
     } 3<"$GLOBALDIR"/coq-log.lock
+    rm "$GLOBALDIR"/processors/"$SLURM_JOB_ID"
 }
 trap end_script EXIT
 
@@ -70,7 +71,7 @@ do
         flock -x 3
         echo "Copy from $COPYDIR"
         # Note the training slash
-        time rsync -az $COPYDIR/ $DIR
+        time rsync -az $COPYDIR/ $DIR 2>&1
 
     } 3<${DIR}.lock
 
