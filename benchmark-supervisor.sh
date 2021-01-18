@@ -37,7 +37,7 @@ touch queue.lock
 
 # Create job that performs compilation of packages in opam
 ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" \
-         --time=06:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
+         --mem-per-cpu=4000 --partition compute --ntasks=1 \
          --open-mode=append --parsable \
          --output="$GLOBALDIR"/initial-compile-output.log \
          --error="$GLOBALDIR"/initial-compile-error.log \
@@ -81,6 +81,8 @@ echo "Data directory: $DATA"
 
 # Collect results
 find $GLOBALDIR/_opam/.opam-switch/build -name '*.bench' | xargs cat > $DATA/combined.bench
+find $GLOBALDIR/processor-logs '*-output.log' | xargs cat > $DATA/processor-output.log
+find $GLOBALDIR/processor-logs '*-error.log' | xargs cat > $DATA/processor-error.log
 cp $GLOBALDIR/*.log $DATA
 
 # Add and push collected files (also includes log files)

@@ -37,8 +37,8 @@ end_script() {
         echo "Copy bench files"
         # Note the training slash
         # Taken from https://stackoverflow.com/a/32527277
-        time rsync -ar  --prune-empty-dirs --include "*/" \
-             --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR 2>&1
+        { time rsync -ar  --prune-empty-dirs --include "*/" \
+               --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR >stdout 2>stderr; } 2>&1
 
     } 3<${DIR}.lock
     {
@@ -71,7 +71,7 @@ do
         flock -x 3
         echo "Copy from $COPYDIR"
         # Note the training slash
-        time rsync -az $COPYDIR/ $DIR 2>&1
+        { time rsync -az $COPYDIR/ $DIR >stdout 2>stderr; } 2>&1
 
     } 3<${DIR}.lock
 

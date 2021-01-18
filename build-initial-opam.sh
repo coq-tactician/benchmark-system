@@ -42,7 +42,7 @@ PARAMS=$DIR/"Params.v"
 touch "$PARAMS"
 for ARG in "$@"
 do
-    echo "$ARG". > "$PARAMS"
+    echo "$ARG". >> "$PARAMS"
 done
 cp $(which bench-wrap) $(opam var bin)/bench-wrap
 cat <<EOF > $DIR/_opam/.opam-switch/config/coq-tactician.config

@@ -25,7 +25,7 @@ export PATH
 
 # We oversubscribe on the supervisor job because it does basically nothing
 sbatch --job-name=tb.$(basename $GLOBALDIR) --cpus-per-task=1 --oversubscribe \
-       --time=06:00:00 --mem-per-cpu=100 --partition compute --ntasks=1 \
+       --mem-per-cpu=100 --partition compute --ntasks=1 \
        --open-mode=append --parsable \
        --output="$GLOBALDIR"/output.log \
        --error="$GLOBALDIR"/error.log \
