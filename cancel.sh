@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eEu
+
 if [ $# -lt 1 ]
 then
     echo "Usage: cancel.sh workspace-dir"

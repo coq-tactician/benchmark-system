@@ -1,6 +1,10 @@
 #!/bin/bash
 
-set -eu
+set -eEu
+catch() {
+    echo "Error $1 occurred on line $2 in $0" >> $GLOBALDIR/error
+}
+trap 'catch $? $LINENO' ERR
 
 if [ $# -lt 5 ]
 then
@@ -81,8 +85,8 @@ echo "Data directory: $DATA"
 
 # Collect results
 find $GLOBALDIR/_opam/.opam-switch/build -name '*.bench' | xargs cat > $DATA/combined.bench
-find $GLOBALDIR/processor-logs '*-output.log' | xargs cat > $DATA/processor-output.log
-find $GLOBALDIR/processor-logs '*-error.log' | xargs cat > $DATA/processor-error.log
+find $GLOBALDIR/processor-logs -name '*-output.log' | xargs cat > $DATA/processor-output.log
+find $GLOBALDIR/processor-logs -name '*-error.log' | xargs cat > $DATA/processor-error.log
 cp $GLOBALDIR/*.log $DATA
 
 # Add and push collected files (also includes log files)

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eu
+set -eEu
 
 if [ $# -lt 3 ]
 then

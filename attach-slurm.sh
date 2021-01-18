@@ -23,6 +23,11 @@ do
             exit $EXIT
         fi
     else
-        exit 0
+        if [ -f ~/tactician/builds/$JOBID/error ]; then
+            echo "Errors occurred during benching"
+            exit 1
+        else
+            exit 0
+        fi
     fi
 done

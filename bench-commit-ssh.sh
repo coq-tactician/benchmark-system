@@ -1,7 +1,6 @@
 #!/bin/bash
 
-set -eu
-set -o pipefail
+set -eEu
 
 if [ $# -lt 1 ]
 then
@@ -11,8 +10,6 @@ fi
 
 CMD=${1}; shift
 
-SCRIPT=$(realpath $0)
-SCRIPTPATH=$(dirname $SCRIPT)
 # Taken from https://stackoverflow.com/a/24625575
 COMMAND_ARRAY=()
 while read line; do

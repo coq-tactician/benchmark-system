@@ -12,3 +12,10 @@ fi
 JOBID=${1}; shift
 
 export TERM=vt100; screen -r $JOBID
+
+if [ -f ~/tactician/builds/$JOBID/error ]; then
+    echo "Errors occurred during benching"
+    exit 1
+else
+    exit 0
+fi

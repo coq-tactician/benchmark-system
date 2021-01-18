@@ -1,6 +1,10 @@
 #!/bin/bash
 
-set -eu
+set -eEu
+catch() {
+    echo "Error $1 occurred on line $2 in $0" >> $GLOBALDIR/error
+}
+trap 'catch $? $LINENO' ERR
 
 if [ $# -lt 2 ]
 then
