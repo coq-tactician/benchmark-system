@@ -6,9 +6,9 @@ catch() {
 }
 trap 'catch $? $LINENO' ERR
 
-if [ $# -lt 6 ]
+if [ $# -lt 8 ]
 then
-    echo "Usage: build-initial-opam.sh dir global-dir #cpus repo commit packages [settings..]"
+    echo "Usage: build-initial-opam.sh dir global-dir #cpus repo commit packages params bench-params"
     exit 1
 fi
 
@@ -18,6 +18,8 @@ CPUS=${1}; shift
 REPO=${1}; shift
 COMMIT=${1}; shift
 PACKAGES=${1}; shift
+PARAMS=${1}; shift
+BENCHPARAMS=${1}; shift
 
 cd $DIR
 
@@ -30,11 +32,11 @@ eval $(opam env --root=$DIR/.opam --set-root)
 opam repo add coq-released https://coq.inria.fr/opam/released
 opam repo add coq-extra-dev https://coq.inria.fr/opam/extra-dev
 opam repo add coq-core-dev https://coq.inria.fr/opam/core-dev
+opam repo add custom-archive https://github.com/LasseBlaauwbroek/custom-archive.git
 
 # Compile commit
-opam pin add --no-action --yes --kind=git coq-tactician "$REPO"#"$COMMIT"
-{ time { opam install coq-tactician \
-              --yes --jobs="$CPUS" 2>&3; }; } 3>&2 2> $GLOBALDIR/tactician-install-time.log
+{ time { opam pin add --yes --kind=git "$REPO"#"$COMMIT" \
+         --jobs="$CPUS" 2>&3; }; } 3>&2 2> $GLOBALDIR/tactician-install-time.log
 
 # Compile dependencies with tactician injected, but without adding things to the queue
 tactician inject
@@ -42,19 +44,15 @@ tactician inject
               --deps-only "$PACKAGES" 2>&3; }; } 3>&2 2> $GLOBALDIR/deps-install-time.log
 
 # Configure and inject Tactician
-PARAMS=$DIR/"Params.v"
-touch "$PARAMS"
-for ARG in "$@"
-do
-    echo "$ARG". >> "$PARAMS"
-done
+echo "$PARAMS" > $DIR/"Params.v"
+echo "$BENCHPARAMS" > $DIR/"BenchParams.v"
 cp $(which bench-wrap) $(opam var bin)/bench-wrap
 cat <<EOF > $DIR/_opam/.opam-switch/config/coq-tactician.config
 #!/bin/bash
 opam-version: "2.0"
 variables {
-    injection-wrappers: "bench-wrap $DIR $GLOBALDIR $PARAMS"
-    injection-flags: ""
+    injection-wrappers: "bench-wrap $DIR $GLOBALDIR $DIR/BenchParams.v"
+    injection-flags: "-l $DIR/Params.v"
 }
 EOF
 

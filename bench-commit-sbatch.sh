@@ -8,7 +8,7 @@ trap 'catch $? $LINENO' ERR
 
 if [ $# -lt 3 ]
 then
-    echo "Usage: bench-commit-sbatch.sh repo commit packages [settings..]"
+    echo "Usage: bench-commit-sbatch.sh repo commit packages params bench-params"
     exit 1
 fi
 
@@ -20,6 +20,8 @@ COMPILECPUS=8
 REPO=${1}; shift
 COMMIT=${1}; shift
 PACKAGES=${1}; shift
+PARAMS=${1}; shift
+BENCHPARAMS=${1}; shift
 
 SCRIPT=$(realpath $0)
 SCRIPTPATH=$(dirname $SCRIPT)
@@ -33,4 +35,4 @@ sbatch --job-name=tb.$(basename $GLOBALDIR) --cpus-per-task=1 --oversubscribe \
        --output="$GLOBALDIR"/output.log \
        --error="$GLOBALDIR"/error.log \
        srun-command.sh benchmark-supervisor.sh "$GLOBALDIR" "$COMPILECPUS" \
-        "$REPO" "$COMMIT" "$PACKAGES" "$@"
+       "$REPO" "$COMMIT" "$PACKAGES" "$PARAMS" "$BENCHPARAMS"

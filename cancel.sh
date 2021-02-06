@@ -10,14 +10,8 @@ fi
 
 DIR=${1}; shift
 
-echo "" > $DIR/queue
+> $DIR/queue
 
-# Let's ask nicely
-scancel -v -s SIGTERM $(ls $DIR/processors)
-
-sleep 1m
-
-# Let's ask less nicely
 scancel -v $(ls $DIR/processors)
 
 # Should not be needed, but lets just be sure

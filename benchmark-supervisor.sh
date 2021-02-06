@@ -6,9 +6,9 @@ catch() {
 }
 trap 'catch $? $LINENO' ERR
 
-if [ $# -lt 5 ]
+if [ $# -lt 7 ]
 then
-    echo "Usage: benchmark-supervisor.sh global-dir #cpus repo commit packages [settings..]"
+    echo "Usage: benchmark-supervisor.sh global-dir #cpus repo commit packages params bench-params"
     exit 1
 fi
 
@@ -17,8 +17,10 @@ CPUS=${1}; shift
 REPO=${1}; shift
 COMMIT=${1}; shift
 PACKAGES=${1}; shift
+PARAMS=${1}; shift
+BENCHPARAMS=${1}; shift
 
-echo "Benchmarking packages $PACKAGES using commit ${REPO}#${COMMIT} with parameters $@"
+echo "Benchmarking packages $PACKAGES using commit ${REPO}#${COMMIT} with parameters $PARAMS $BENCHPARAMS"
 echo "Workspace directory: ${GLOBALDIR}"
 
 module use ~/.local/easybuild/modules/all
@@ -40,13 +42,13 @@ touch queue
 touch queue.lock
 
 # Create job that performs compilation of packages in opam
-ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" \
+ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" --exclude=node-09,node-02 \
          --mem-per-cpu=4000 --partition compute --ntasks=1 \
          --open-mode=append --parsable \
          --output="$GLOBALDIR"/initial-compile-output.log \
          --error="$GLOBALDIR"/initial-compile-error.log \
          srun-command.sh compile-task.sh "$DIR" "$GLOBALDIR" \
-         "$CPUS" "$REPO" "$COMMIT" "$PACKAGES" "$@")
+         "$CPUS" "$REPO" "$COMMIT" "$PACKAGES" "$PARAMS" "$BENCHPARAMS")
 touch "$GLOBALDIR"/processors/"$ID"
 
 while true
@@ -77,7 +79,7 @@ echo "Processing done"
 echo "Collecting results"
 
 # Create data directory
-PARAMSTR=$(echo $* | tr ' ' '-' | tr '=' '-')
+PARAMSTR=$(echo $PARAMS $BENCHPARAMS | tr ' ' '-' | tr '=' '-')
 DATAREPO=/home/blaaulas/tactician/benchmark-data
 DATA=$DATAREPO/$COMMIT/$PARAMSTR
 mkdir -p $DATA

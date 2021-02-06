@@ -28,7 +28,7 @@ do
         then
             #Spawn a job
             ID=$(sbatch --job-name=pr.$(basename $GLOBALDIR) --cpus-per-task=1 \
-                   --time=03:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
+                   --time=04:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
                    --open-mode=append --parsable \
                    --output="$GLOBALDIR"/processor-logs/%A-output.log \
                    --error="$GLOBALDIR"/processor-logs/%A-error.log \

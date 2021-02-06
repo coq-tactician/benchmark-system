@@ -6,9 +6,9 @@ catch() {
 }
 trap 'catch $? $LINENO' ERR
 
-if [ $# -lt 3 ]
+if [ $# -lt 5 ]
 then
-    echo "Usage: bench-commit-screen.sh repo commit packages [settings..]"
+    echo "Usage: bench-commit-screen.sh repo commit packages params bench-params"
     exit 1
 fi
 
@@ -21,6 +21,8 @@ COMPILECPUS=8
 REPO=${1}; shift
 COMMIT=${1}; shift
 PACKAGES=${1}; shift
+PARAMS=${1}; shift
+BENCHPARAMS=${1}; shift
 
 SCRIPT=$(realpath $0)
 SCRIPTPATH=$(dirname $SCRIPT)
@@ -28,5 +30,5 @@ PATH=$SCRIPTPATH:$PATH
 export PATH
 
 screen -dm -S $NAME tee-output.sh "$GLOBALDIR"/output.log "$GLOBALDIR"/error.log \
-       benchmark-supervisor.sh "$GLOBALDIR" "$COMPILECPUS" "$REPO" "$COMMIT" "$PACKAGES" "$@"
+       benchmark-supervisor.sh "$GLOBALDIR" "$COMPILECPUS" "$REPO" "$COMMIT" "$PACKAGES" "$PARAMS" "$BENCHPARAMS"
 echo $NAME

@@ -26,6 +26,7 @@ COPYDIR=$(cat $GLOBALDIR/copy-dir)
     AVAILABLE=$(($AVAILABLE + 1))
     echo $AVAILABLE > ~/tactician/squeue-free
 } 3< ~/tactician/squeue-free.lock
+spawn-processor.sh "$DIR" "$GLOBALDIR"
 
 # Create dir lockfile if not exists
 touch ${DIR}.lock
@@ -33,8 +34,10 @@ touch ${DIR}.lock
 COQOUT=$(mktemp)
 COQERR=$(mktemp)
 
+# Find and delete old runs
+find /tmp/tactician-* -maxdepth 0 -type d -ctime +2 | xargs rm -rf
+
 end_script() {
-    spawn-processor.sh "$DIR" "$GLOBALDIR"
     # Copy generated bench files to the global working directory
     {
         flock -x 3
@@ -42,7 +45,7 @@ end_script() {
         # Note the training slash
         # Taken from https://stackoverflow.com/a/32527277
         { time rsync -ar  --prune-empty-dirs --include "*/" \
-               --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR >stdout 2>stderr; } 2>&1
+               --include="*.bench" --exclude="*" $DIR/ $GLOBALDIR >/dev/stdout 2>/dev/stderr; } 2>&1
 
     } 3<${DIR}.lock
     {
@@ -51,6 +54,8 @@ end_script() {
         cat $COQERR >> "$GLOBALDIR"/coq-err.log
     } 3<"$GLOBALDIR"/coq-log.lock
     rm "$GLOBALDIR"/processors/"$SLURM_JOB_ID"
+    rm $COQOUT
+    rm $COQERR
 }
 trap end_script EXIT
 
@@ -75,7 +80,7 @@ do
         flock -x 3
         echo "Copy from $COPYDIR"
         # Note the training slash
-        { time rsync -az $COPYDIR/ $DIR >stdout 2>stderr; } 2>&1
+        { time rsync -az $COPYDIR/ $DIR >/dev/stdout 2>/dev/stderr; } 2>&1
 
     } 3<${DIR}.lock
 
