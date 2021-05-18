@@ -23,6 +23,14 @@ BENCHPARAMS=${1}; shift
 
 cd $DIR
 
+# Setup external deps, if they exist
+git clone $REPO repo --recurse-submodules
+(cd repo && git checkout $COMMIT --recurse-submodules)
+if test -f "repo/install-external-dependencies"; then
+    source repo/install-external-dependencies
+fi
+#rm -rf repo
+
 # Initialize opam
 opam init --bare --root=$DIR/.opam --no-setup --bypass-checks --disable-sandbox
 opam switch create . --empty --root=$DIR/.opam

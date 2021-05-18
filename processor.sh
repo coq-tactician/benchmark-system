@@ -80,7 +80,7 @@ do
         flock -x 3
         echo "Copy from $COPYDIR"
         # Note the training slash
-        { time rsync -az $COPYDIR/ $DIR >/dev/stdout 2>/dev/stderr; } 2>&1
+        { time ssh $(hostname) rsync -az $COPYDIR/ $DIR >/dev/stdout 2>/dev/stderr; } 2>&1
 
     } 3<${DIR}.lock
 

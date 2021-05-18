@@ -24,7 +24,7 @@ echo "Benchmarking packages $PACKAGES using commit ${REPO}#${COMMIT} with parame
 echo "Workspace directory: ${GLOBALDIR}"
 
 module use ~/.local/easybuild/modules/all
-module load git git-lfs bubblewrap OCaml parallel
+module load git bubblewrap OCaml Anaconda3 CapnProto
 
 # Determine local build directory name, and the directory to copy from
 DIR=$(mktemp --directory -t tactician-XXXXXX)
@@ -42,8 +42,8 @@ touch queue
 touch queue.lock
 
 # Create job that performs compilation of packages in opam
-ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" --exclude=node-09,node-02 \
-         --mem-per-cpu=4000 --partition compute --ntasks=1 \
+ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" \
+         --time=01:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
          --open-mode=append --parsable \
          --output="$GLOBALDIR"/initial-compile-output.log \
          --error="$GLOBALDIR"/initial-compile-error.log \
