@@ -23,6 +23,8 @@ BENCHPARAMS=${1}; shift
 
 cd $DIR
 
+env
+
 # Setup external deps, if they exist
 git clone $REPO repo --recurse-submodules
 (cd repo && git checkout $COMMIT --recurse-submodules)
@@ -55,13 +57,11 @@ tactician inject
 echo "$PARAMS" > $DIR/"Params.v"
 echo "$BENCHPARAMS" > $DIR/"BenchParams.v"
 cp $(which bench-wrap) $(opam var bin)/bench-wrap
-cat <<EOF > $DIR/_opam/.opam-switch/config/coq-tactician.config
-#!/bin/bash
-opam-version: "2.0"
-variables {
-    injection-wrappers: "bench-wrap $DIR $GLOBALDIR $DIR/BenchParams.v"
-    injection-flags: "-l $DIR/Params.v"
-}
+cat <<EOF > $DIR/_opam/share/coq-tactician/plugins/coq-tactician/injection-wrappers
+bench-wrap $DIR $GLOBALDIR $DIR/BenchParams.v
+EOF
+cat <<EOF > $DIR/_opam/share/coq-tactician/plugins/coq-tactician/injection-flags
+-l $DIR/Params.v
 EOF
 
 # Compile packages first time

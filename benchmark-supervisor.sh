@@ -26,6 +26,9 @@ echo "Workspace directory: ${GLOBALDIR}"
 module use ~/.local/easybuild/modules/all
 module load git bubblewrap OCaml Anaconda3 CapnProto
 
+mkdir -p /lscratch/blaaulas
+export TMPDIR=/lscratch/blaaulas
+
 # Determine local build directory name, and the directory to copy from
 DIR=$(mktemp --directory -t tactician-XXXXXX)
 echo "Local build directories: ${DIR}"
@@ -40,6 +43,9 @@ touch finished-jobs
 touch finished-jobs.lock
 touch queue
 touch queue.lock
+
+# Find and delete old runs
+find /lscratch/blaaulas/tactician-* -maxdepth 0 -type d -ctime +1 | xargs rm -rf
 
 # Create job that performs compilation of packages in opam
 ID=$(sbatch --job-name=cp.$(basename $GLOBALDIR) --cpus-per-task="$CPUS" \

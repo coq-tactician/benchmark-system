@@ -34,3 +34,14 @@ echo $COPYDIRBIG > $GLOBALDIR/copy-dir
       bwrap --dev-bind / / --die-with-parent --bind $COPYDIR $DIR \
             build-initial-opam.sh $DIR $GLOBALDIR $CPUS $REPO $COMMIT "$PACKAGES" "$PARAMS" "$BENCHPARAMS" 2>&3
   }; } 3>&2 2> $GLOBALDIR/base-install-time.log
+
+# Move copy dir
+echo "Copy to node head"
+NEWCOPYDIR=node-head:$COPYDIR
+# Note the training slash
+{ time rsync -az $COPYDIR/ $NEWCOPYDIR >/dev/stdout 2>/dev/stderr; } 2>&1
+
+echo $NEWCOPYDIR > $GLOBALDIR/copy-dir
+
+# wait to avoid race conditions
+sleep 5m

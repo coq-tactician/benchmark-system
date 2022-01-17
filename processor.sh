@@ -17,8 +17,6 @@ MAX_TIME=3600
 DIR=${1}; shift
 GLOBALDIR=${1}; shift
 
-COPYDIR=$(cat $GLOBALDIR/copy-dir)
-
 # This processor is no longer in queue, thus we can increase squeue-free
 {
     flock -x 3
@@ -35,7 +33,8 @@ COQOUT=$(mktemp)
 COQERR=$(mktemp)
 
 # Find and delete old runs
-find /tmp/tactician-* -maxdepth 0 -type d -ctime +2 | xargs rm -rf
+mkdir -p /lscratch/blaaulas
+find /lscratch/blaaulas/tactician-* -maxdepth 0 -type d -ctime +2 | xargs rm -rf
 
 end_script() {
     # Copy generated bench files to the global working directory
@@ -78,6 +77,7 @@ do
     # Update local copy of build dir
     {
         flock -x 3
+        COPYDIR=$(cat $GLOBALDIR/copy-dir)
         echo "Copy from $COPYDIR"
         # Note the training slash
         { time ssh $(hostname) rsync -az $COPYDIR/ $DIR >/dev/stdout 2>/dev/stderr; } 2>&1
