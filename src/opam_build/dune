@@ -1,0 +1,7 @@
+(library
+ (name opam_build)
+ (modules opam_benchmark)
+ (libraries
+   core async opam-client)
+ (preprocess (pps ppx_jane))
+)
