@@ -511,9 +511,11 @@ let main
     Deferred.all_unit processors >>= fun () ->
     cont >>= summarize)
   >>= fun () ->
-  commit ~error_writer ~data_dir ~benchmark_repo ~benchmark_commit >>| fun () ->
+  commit ~error_writer ~data_dir ~benchmark_repo ~benchmark_commit >>= fun () ->
   if Deferred.is_determined error_occurred then
-    Command.exit 1
+    Deferred.Or_error.error_string "Benching errors occurred"
+  else
+    Deferred.Or_error.ok_unit
 
 module CommandLetSyntax = struct
   include Command.Param
@@ -521,12 +523,28 @@ module CommandLetSyntax = struct
   let (and+) = both
 end
 
+let rec _rmrf path =
+  Sys.is_directory path >>= function
+  | `Yes ->
+    Sys.readdir path >>= fun dir ->
+    Deferred.Array.all_unit @@ Array.map dir ~f:(fun name -> _rmrf (Filename.concat path name)) >>= fun () ->
+    Unix.rmdir path
+  | `No -> Sys.remove path
+  | `Unknown -> Deferred.unit
+(* TODO: this is a hack; the solution above is not reliable *)
+let rmrf path =
+  Process.run
+    ~prog:"rm"
+    ~args:["-rf"; path] () >>| function
+  | Ok _ -> ()
+  | Error e -> raise (Error.to_exn e)
+
 (* TODO: This can be much better, look at the bos package. *)
 let with_temp parent cont =
   let (/) = Filename.concat in
   Unix.mkdtemp (parent/"tactician-benchmark") >>= fun d ->
   try_with (fun () -> cont d) >>= fun res ->
-  Unix.rmdir d >>| fun () -> match res with
+  rmrf d >>| fun () -> match res with
   | Ok x -> x
   | Error e -> raise e
 
@@ -570,8 +588,9 @@ let command =
          >>= fun with_scratch -> with_scratch @@ fun scratch ->
          print_endline ("Scratch directory: " ^ scratch);
          List.iter ~f:print_endline packages;
-         Deferred.map (main ~scratch ~delay_benchmark ~processors ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~time ~packages) ~f:(fun () -> Ok ())
-    )
+         main
+           ~scratch ~delay_benchmark ~processors
+           ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~time ~packages)
 
 (* TODO: Properly catch CTRL+C for cleanup *)
 (* TODO: Use brwap to sandbox to the scratch directory *)
