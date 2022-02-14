@@ -112,8 +112,7 @@ module Cmd_worker = struct
         Deferred.return @@ Pipe.create_reader ~close_on_exception:false @@ fun w ->
         make_process info >>= function
         | Error e -> Pipe.write w (`Error e)
-        | Ok (_str, { stdout; stderr; sock_in; sock_out; wait; _ }) ->
-          (* Pipe.write w (`Stderr str) >>= fun () -> *)
+        | Ok (str, { stdout; stderr; sock_in; sock_out; wait; _ }) ->
           let request = Marshal.to_bytes ({ lemmas } : bench_request) [] in
           Writer.write_bytes sock_in request;
           let pipes =
@@ -124,9 +123,10 @@ module Cmd_worker = struct
           force wait >>= function
           | Ok _ -> Deferred.unit
           | Error (`Exit_non_zero i) ->
-            Pipe.write w (`Error (Error.of_string ("Abnormal exit code for coqc: " ^ string_of_int i)))
+            Pipe.write w (`Error (Error.createf "Abnormal exit code for coqc: %d\n Invocation:\n%s" i str))
           | Error (`Signal s) ->
-            Pipe.write w (`Error (Error.of_string ("Abnormal exit signal for coqc: " ^ Signal.to_string s)))
+            Pipe.write w (`Error (Error.createf "Abnormal exit signal for coqc: %s\n Invocation:\n%s"
+                                    (Signal.to_string s) str))
 
       let process =
         C.create_pipe ~f:process_impl ~bin_input:Cmd.bin_t ~bin_output:Response.bin_t ()
@@ -184,8 +184,7 @@ let run_processor
                 Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
              )
            | `Error e ->
-             Pipe.write coq_err (Error.to_string_hum e) >>= fun () ->
-             Pipe.write stderr (Error.to_string_hum e) >>= fun () -> Deferred.Or_error.fail e
+             Pipe.write coq_err (Error.to_string_hum e) >>= fun () -> Deferred.Or_error.fail e
            | `Stdout str -> Pipe.write coq_out str >>| fun () -> acc
            | `Stderr str -> Pipe.write coq_err str >>= fun () -> Pipe.write stderr str >>| fun () -> acc
          ) >>=? fun (final, processed_lemmas) ->
