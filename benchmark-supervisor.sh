@@ -72,7 +72,7 @@ do
         } 3<"$GLOBALDIR"/queue.lock
         {
             flock -x 3
-            FINISHED=$(cat "$GLOBALDIR"/finished-jobs | cut -f1 | cat - <(printf 0) | paste -s -d+ - | bc)
+            FINISHED="X" #FINISHED=$(cat "$GLOBALDIR"/finished-jobs | cut -f1 | cat - <(printf 0) | paste -s -d+ - | bc)
         } 3<"$GLOBALDIR"/finished-jobs.lock
         echo "Processed $FINISHED out of $TOTAL lemmas (rough approximation)"
         sleep 1m
