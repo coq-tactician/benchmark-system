@@ -101,7 +101,6 @@ module Cmd_worker = struct
           String.chop_suffix_exn exec ~suffix:("lib"/"coq-tactician"/"coqc.real") ^ "bin"/"coqc" in
         let args = bargs @ [exec] @ args in
         let str = "(cd " ^ dir ^ " && " ^ String.concat ~sep:" " ("bwrap"::args) ^ ")" in
-        Pipe.write w (`Stdout str) >>= fun () ->
         Process.run
           ~working_dir:dir
           ~prog:"chmod"
