@@ -158,10 +158,10 @@ exception CompilationError
 let rec remove_sequence ~seq ls =
   match ls with
   | [] -> raise_s (Async.Sexp.of_string "Sequence not found in list")
-  | _::ls' ->
+  | x::ls' ->
     if List.is_prefix ~prefix:seq ~equal:String.equal ls
     then List.drop ls (List.length seq)
-    else remove_sequence ~seq ls'
+    else x :: remove_sequence ~seq ls'
 
 let post_process_info to_remove ({ args; _ } as info) =
   let args = Array.of_list @@ remove_sequence ~seq:to_remove @@ Array.to_list args in

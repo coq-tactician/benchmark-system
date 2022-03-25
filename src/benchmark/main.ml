@@ -67,7 +67,7 @@ module Cmd_worker = struct
         C.create_rpc ~f:hostname_impl ~bin_input:Unit.bin_t ~bin_output:String.bin_t ()
 
       let make_process { exec; args; env; dir; lemmas = _ } =
-        let args = Array.to_list args in
+        let args = List.tl_exn @@ Array.to_list args in
         let vo_files =
           Sys.getcwd () >>= fun old_pwd ->
           Sys.chdir dir >>= fun () ->
