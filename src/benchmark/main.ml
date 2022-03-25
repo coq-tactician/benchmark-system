@@ -449,6 +449,11 @@ let commit
   let stdout = Lazy.force Writer.stdout in
   Writer.write stdout "\n\nUploading benchmark results\n\n";
   (Process.run
+      ~working_dir:data_dir
+      ~prog:"git"
+      ~args:["pull"] () >>=? fun out ->
+    Writer.write stdout out;
+    Process.run
     ~working_dir:data_dir
     ~prog:"git"
     ~args:["add"; "."] () >>=? fun out ->
@@ -480,6 +485,12 @@ let main
     ~packages
   =
   let (/) = Filename.concat in
+  Process.run
+    ~working_dir:benchmark_data
+    ~prog:"git"
+    ~args:["pull"] () >>=? fun out ->
+  let stdout = Lazy.force Writer.stdout in
+  Writer.write stdout out;
   prepare_data_dir ~benchmark_data ~benchmark_commit ~time >>= fun data_dir ->
   with_log_writer (data_dir/"error.log") @@ fun error_log ->
   let error_writer, error_occurred = error_handler error_log in
