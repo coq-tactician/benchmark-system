@@ -230,7 +230,8 @@ module Build_worker = struct
       type t = { root_dir : string
                ; benchmark_target : string
                ; benchmark_url : string
-               ; packages : string list } [@@deriving bin_io]
+               ; packages : string list
+               ; injections_extra : string list } [@@deriving bin_io]
     end
     module Response = struct
       type t =
@@ -267,12 +268,15 @@ module Build_worker = struct
       let hostname =
         C.create_rpc ~f:hostname_impl ~bin_input:Unit.bin_t ~bin_output:String.bin_t ()
 
-      let build_impl ~worker_state:() ~conn_state:() Cmd.{ root_dir; benchmark_target; benchmark_url; packages } =
+      let build_impl ~worker_state:() ~conn_state:()
+          Cmd.{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } =
         compile_and_retrieve_benchmark_info
             ~root_dir
             ~benchmark_target
             ~benchmark_url
-            ~packages >>| fun (info, cont) ->
+            ~packages
+            ~injections_extra
+        >>| fun (info, cont) ->
         Pipe.create_reader ~close_on_exception:true @@ fun w ->
         Pipe.transfer info w ~f:(fun info -> `Info info) >>= fun () ->
         cont >>= fun timings ->
@@ -297,7 +301,8 @@ let compile_and_retrieve_benchmark_info
   ~root_dir
   ~benchmark_target
   ~benchmark_url
-  ~packages =
+  ~packages
+  ~injections_extra =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
   Build_worker.spawn_in_foreground
@@ -319,7 +324,7 @@ let compile_and_retrieve_benchmark_info
     ~arg:() >>=? fun hostname ->
   Build_worker.Connection.run conn
         ~f:Build_worker.functions.build
-        ~arg:{ root_dir; benchmark_target; benchmark_url; packages } >>|? fun r ->
+        ~arg:{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } >>|? fun r ->
   let r1, r2 = Pipe.fork ~pushback_uses:`Fast_consumer_only r in
   let r1 = Pipe.filter_map r1 ~f:(function | `Info info -> Some info | `Timings _ -> None) in
   let r2 = Pipe.filter_map r2 ~f:(function | `Info _ -> None | `Timings timings -> Some timings) in
@@ -362,6 +367,13 @@ let write_bench_params ~scratch ~time =
       Writer.write w ("Set Tactician Benchmark " ^ string_of_int time ^ "."); Deferred.unit)
   >>| fun () ->
   [| "-l"; file_name |]
+
+let write_injections ~data_dir ~injections_extra =
+  let (/) = Filename.concat in
+  let write fn =
+    Writer.with_file fn ~f:(fun w ->
+        List.iter ~f:(Writer.write_line w) injections_extra; Deferred.unit) in
+  write (data_dir/"Injections.v")
 
 let prepare_data_dir ~benchmark_data ~benchmark_commit ~time =
   let (/) = Filename.concat in
@@ -474,6 +486,7 @@ let commit
   | Error e -> Pipe.write error_writer e
 
 let main
+    ~injections_extra
     ~scratch
     ~delay_benchmark
     ~processors
@@ -502,6 +515,7 @@ let main
   with_log_pipe (data_dir/"processor-out.log") @@ fun processor_out ->
   with_log_pipe (data_dir/"processor-err.log") @@ fun processor_err ->
   with_log_writer (data_dir/"combined.bench") @@ fun bench_log ->
+  write_injections ~data_dir ~injections_extra >>= fun () ->
   compile_and_retrieve_benchmark_info
     ~error_writer ~error_occurred
     ~opam_out ~opam_err ~opam_timings
@@ -509,12 +523,14 @@ let main
     ~benchmark_target
     ~benchmark_url:(benchmark_repo ^ "#" ^ benchmark_commit)
     ~packages
+    ~injections_extra
   >>= function
   | Error e ->
     Pipe.write error_writer e
   | Ok (info_stream, cont) ->
     write_bench_params ~scratch ~time >>= fun extra_args ->
-    let info_stream = Pipe.map info_stream ~f:(fun ({ args; _ } as info) -> { info with args = Array.append args extra_args }) in
+    let info_stream = Pipe.map info_stream ~f:(fun ({ args; _ } as info) ->
+        { info with args = Array.append args extra_args }) in
     let info_stream, reporter_stream = Pipe.fork ~pushback_uses:`Fast_consumer_only info_stream in
     let reporter, summarize = reporter time reporter_stream bench_log in
     (if delay_benchmark then cont else Deferred.unit) >>= fun () ->
@@ -562,6 +578,10 @@ let with_temp parent cont =
   | Ok x -> x
   | Error e -> raise e
 
+let compile_injection_string ~injection_strings ~injection_files =
+  Deferred.List.concat_map ~f:Reader.file_lines injection_files >>| fun file_lines ->
+  file_lines@injection_strings
+
 let command =
   Log.Global.set_level `Error;
   let open CommandLetSyntax in
@@ -575,6 +595,12 @@ let command =
      let+ loc = choose_one [tmp_dir; build_dir] ~if_nothing_chosen:If_nothing_chosen.Return_none
      and+ delay_benchmark = flag "delay-benchmark" no_arg
          ~doc:"Delay the benchmark until the initial build is fully complete. Useful when the build process may interfere with the benchmark timings."
+     and+ injection_strings = flag "inject" (listed string)
+         ~doc:"vernacular Inject Coq vernacular into the compilation and benchmarking process. \
+               Typically used to specify options. Can be repeated multiple times and combined with -inject-file."
+     and+ injection_files = flag "inject-file" (listed string)
+         ~doc:"file Inject a file containing Coq vernacular into the compilation and benchmarking process. \
+               Typically used to specify options. Can be repeated multiple times and combined with -inject-file."
      and+ benchmark_data = anon ("benchmark-data" %: string)
      and+ benchmark_target = anon ("benchmark-target" %: string)
      and+ benchmark_repo = anon ("benchmark-repo" %: string)
@@ -602,11 +628,12 @@ let command =
          >>= fun with_scratch -> with_scratch @@ fun scratch ->
          print_endline ("Scratch directory: " ^ scratch);
          List.iter ~f:print_endline packages;
+         compile_injection_string ~injection_strings ~injection_files >>= fun injections_extra ->
          main
+           ~injections_extra
            ~scratch ~delay_benchmark ~processors
            ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~time ~packages)
 
-(* TODO: Properly catch CTRL+C for cleanup *)
 (* TODO: Use brwap to sandbox to the scratch directory *)
 let () =
   (match Core.Unix.fork () with

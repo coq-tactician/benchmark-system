@@ -45,19 +45,25 @@ let inject ~gt ~st =
   let st = config_add_remove gt ?st "pre-build-commands" pre_build_command in
   Option.get st
 
-let enable_bench ~st ~port =
+let enable_bench ~st ~port ~injections_extra =
   let nv = OpamSwitchState.get_package st tactician_package in
   let opam = OpamSwitchState.opam st nv in
   let env = OpamPackageVar.resolve ~opam st in
   let share_var = OpamVariable.(Full.create tactician_package (of_string "share")) in
   let share = OpamFilter.ident_string env (OpamFilter.ident_of_var share_var) in
   let (/) = Filename.concat in
+
   let prebench_file = share/"plugins"/"coq-tactician"/"PreBench.v" in
   let prebench_contents = "Set Tactician Prebench Port " ^ string_of_int port ^ "." in
   OpamFilename.write (OpamFilename.of_string prebench_file) prebench_contents;
+
+  let injections_extra_file = share/"plugins"/"coq-tactician"/"Injections.v" in
+  let injections_extra_contents = String.concat "\n" injections_extra in
+  OpamFilename.write (OpamFilename.of_string injections_extra_file) injections_extra_contents;
+
   let injection_file = share/"plugins"/"coq-tactician"/"injection-flags" in
   let injection_flags = ["-l"; prebench_file] in
-  let injection_contents = String.concat " " injection_flags in
+  let injection_contents = String.concat " " (injection_flags @ ["-l"; injections_extra_file]) in
   OpamFilename.write (OpamFilename.of_string injection_file) injection_contents;
   injection_flags
 
@@ -69,7 +75,7 @@ let timing () =
     Time_ns.abs_diff before after
 
 let build_switch_for_benchmark
-    ~gt ~rt ~port ~benchmark_target ~benchmark_url ~packages =
+    ~gt ~rt ~port ~benchmark_target ~benchmark_url ~packages ~injections_extra =
   let switch = OpamSwitch.of_string "bench" in
   let packages = List.map OpamFormula.atom_of_string packages in
   let do_actions st =
@@ -100,7 +106,7 @@ let build_switch_for_benchmark
     let st = OpamClient.install st ~deps_only:true packages in
     let deps_install_time = deps_install_time () in
 
-    enable_bench ~st ~port, fun () ->
+    enable_bench ~st ~port ~injections_extra, fun () ->
       let subject_install_time = timing () in
       let st = OpamClient.install st packages in
       let subject_install_time = subject_install_time () in
@@ -127,6 +133,7 @@ let compile_for_benchmark
     ~benchmark_target
     ~benchmark_url
     ~packages
+    ~injections_extra
   =
   let total_install_time = timing () in
   opam_init
@@ -136,7 +143,8 @@ let compile_for_benchmark
   let inj_flags, cont = build_switch_for_benchmark ~gt ~rt ~port
     ~benchmark_target
     ~benchmark_url
-    ~packages in
+    ~packages
+    ~injections_extra in
   inj_flags, fun () ->
     let st, (a, b, c) = cont () in
     let total_install_time = total_install_time () in
@@ -172,6 +180,7 @@ let compile_and_retrieve_benchmark_info
     ~benchmark_target
     ~benchmark_url
     ~packages
+    ~injections_extra
   : (pre_bench_info Pipe.Reader.t * _ Deferred.t) Deferred.t =
   let r, w = Pipe.create () in
   Async_unix.Tcp.Server.create ~on_handler_error:`Raise
@@ -188,7 +197,7 @@ let compile_and_retrieve_benchmark_info
   let `Inet (_addr, port) = Async_unix.Tcp.Server.listening_on_address server in
   In_thread.run (fun () ->
       compile_for_benchmark
-        ~port ~root_dir ~benchmark_target ~benchmark_url ~packages)
+        ~port ~root_dir ~benchmark_target ~benchmark_url ~packages ~injections_extra)
   >>| fun (to_remove, cont) ->
   let r = Pipe.map r ~f:(post_process_info to_remove) in
   let cont =
