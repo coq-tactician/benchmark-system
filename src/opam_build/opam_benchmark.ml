@@ -53,15 +53,19 @@ let enable_bench ~st ~port ~injections_extra =
   let share = OpamFilter.ident_string env (OpamFilter.ident_of_var share_var) in
   let (/) = Filename.concat in
 
-  let prebench_file = share/"plugins"/"coq-tactician"/"PreBench.v" in
+  let bench_dir = share/"plugins"/"zzz-benchmark" in
+  if not (Sys.file_exists bench_dir) then
+    Sys.mkdir bench_dir 0o755;
+
+  let prebench_file = bench_dir/"PreBench.v" in
   let prebench_contents = "Set Tactician Prebench Port " ^ string_of_int port ^ "." in
   OpamFilename.write (OpamFilename.of_string prebench_file) prebench_contents;
 
-  let injections_extra_file = share/"plugins"/"coq-tactician"/"Injections.v" in
+  let injections_extra_file = bench_dir/"Injections.v" in
   let injections_extra_contents = String.concat "\n" injections_extra in
   OpamFilename.write (OpamFilename.of_string injections_extra_file) injections_extra_contents;
 
-  let injection_file = share/"plugins"/"coq-tactician"/"injection-flags" in
+  let injection_file = bench_dir/"injection-flags" in
   let injection_flags = ["-l"; prebench_file] in
   let injection_contents = String.concat " " (injection_flags @ ["-l"; injections_extra_file]) in
   OpamFilename.write (OpamFilename.of_string injection_file) injection_contents;
