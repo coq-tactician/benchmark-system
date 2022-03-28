@@ -9,7 +9,9 @@ let main () =
       ~benchmark_target:"coq-tactician"
       ~benchmark_url:
         "git+file:///home/lasse/Documents/Projects/Tactician/develop/coq-tactician#newbench"
-      ~packages:["coq-tactician-stdlib"] >>= fun (r, cont) ->
+      ~packages:["coq-tactician-stdlib"]
+      ~injections_extra:[]
+  >>= fun (r, cont) ->
   Pipe.iter r ~f:(fun { exec; args; env; dir; lemmas } ->
       print_endline exec;
       print_endline dir;
