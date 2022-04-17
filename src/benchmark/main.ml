@@ -336,69 +336,99 @@ module Build_worker = struct
 end
 
 let compile_and_retrieve_benchmark_info
-  ~error_writer ~error_occurred
-  ~opam_out ~opam_err ~opam_timings
-  ~root_dir
-  ~benchmark_target
-  ~benchmark_url
-  ~packages
-  ~injections_extra =
+    ~error_writer ~error_occurred
+    ~compile_allocator
+    ~opam_out ~opam_err ~opam_timings
+    ~root_dir
+    ~benchmark_target
+    ~benchmark_url
+    ~packages
+    ~injections_extra =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
-  Build_worker.spawn_in_foreground
-    ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
-    ~shutdown_on:Connection_closed
-    ()
-    ~connection_state_init_arg:()
-  >>=? fun (conn, process) ->
-  don't_wait_for (error_occurred >>= fun () -> Build_worker.Connection.close conn);
-  let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
-  let pout1, pout2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stdout process) in
-  let pipes =
-    [ Pipe.transfer_id pout1 opam_out
-    ; Pipe.transfer_id pout2 stdout
-    ; Pipe.transfer_id perr1 opam_err
-    ; Pipe.transfer_id perr2 stderr ] in
-  Build_worker.Connection.run conn
-    ~f:Build_worker.functions.hostname
-    ~arg:() >>=? fun hostname ->
-  Build_worker.Connection.run conn
-        ~f:Build_worker.functions.build
-        ~arg:{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } >>|? fun r ->
-  let r1, r2 = Pipe.fork ~pushback_uses:`Fast_consumer_only r in
-  let r1 = Pipe.filter_map r1 ~f:(function | `Info info -> Some info | `Timings _ -> None) in
-  let r2 = Pipe.filter_map r2 ~f:(function | `Info _ -> None | `Timings timings -> Some timings) in
-  r1,
-  Pipe.read_all r2 >>= fun timings ->
-  let finish =
-    Build_worker.Connection.close conn >>= fun () ->
-    Deferred.all_unit pipes >>= fun () ->
-    Process.wait process >>= (function
-        | Ok () -> Deferred.unit
-        | Error (`Exit_non_zero i) ->
-          let err = "Abnormal exit code for build worker on host " ^ hostname ^ ". Code: " ^ string_of_int i in
-          Pipe.write opam_err err >>= fun () ->
-          Pipe.write error_writer (Error.of_string err)
-        | Error (`Signal s) ->
-          let err = "Abnormal exit signal for build worker on host " ^ hostname ^ ". Signal: " ^ Signal.to_string s in
-          Pipe.write opam_err err >>= fun () ->
-          Pipe.write error_writer (Error.of_string err)) in
-  match Base.Queue.to_list timings with
-  | [`Total_install_time total_install_time,
-     `Target_install_time target_install_time,
-     `Deps_install_time deps_install_time,
-     `Subject_install_time subject_install_time] ->
-    let str =
-      "Total install time: " ^ Time_ns.Span.to_string_hum total_install_time ^ "\n" ^
-      "Target install time: " ^ Time_ns.Span.to_string_hum target_install_time ^ "\n" ^
-      "Deps install time: " ^ Time_ns.Span.to_string_hum deps_install_time ^ "\n" ^
-      "Subject install time: " ^ Time_ns.Span.to_string_hum subject_install_time ^ "\n"
+  Process.create
+    ~prog:"setsid"
+    ~args:["-w"; compile_allocator]
+    () >>=? fun p ->
+  Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Group (Process.pid p)));
+  let pipe = Reader.transfer (Process.stderr p) stderr in
+  let pstdout = Process.stdout p in
+  let stop_clock = Ivar.create () in
+  Clock_ns.every ~start:(Clock_ns.after Time_ns.Span.second)
+    ~stop:(Ivar.read stop_clock) Time_ns.Span.minute (fun () ->
+      Print.printf "\nWaiting for initial compilation resources\n");
+  Reader.read_line pstdout >>= fun line ->
+  Ivar.fill stop_clock ();
+  match line with
+  | `Eof -> Deferred.Or_error.fail @@ Error.createf "Compile alloc protocol error: Unexpected eof"
+  | `Ok _invocation ->
+    Build_worker.spawn_in_foreground
+      ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
+      ~shutdown_on:Connection_closed
+      ()
+      ~connection_state_init_arg:()
+    >>=? fun (conn, process) ->
+    don't_wait_for (error_occurred >>= fun () -> Build_worker.Connection.close conn);
+    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
+    let pout1, pout2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stdout process) in
+    let pipes =
+      [ Pipe.transfer_id pout1 opam_out
+      ; Pipe.transfer_id pout2 stdout
+      ; Pipe.transfer_id perr1 opam_err
+      ; Pipe.transfer_id perr2 stderr ] in
+    Build_worker.Connection.run conn
+      ~f:Build_worker.functions.hostname
+      ~arg:() >>=? fun hostname ->
+    Build_worker.Connection.run conn
+      ~f:Build_worker.functions.build
+      ~arg:{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } >>|? fun r ->
+    let r1, r2 = Pipe.fork ~pushback_uses:`Fast_consumer_only r in
+    let r1 = Pipe.filter_map r1 ~f:(function | `Info info -> Some info | `Timings _ -> None) in
+    let r2 = Pipe.filter_map r2 ~f:(function | `Info _ -> None | `Timings timings -> Some timings) in
+    r1,
+    Pipe.read_all r2 >>= fun timings ->
+    let finish =
+      Build_worker.Connection.close conn >>= fun () ->
+      Deferred.all_unit pipes >>= fun () ->
+      Process.wait process >>= (function
+          | Ok () -> Deferred.unit
+          | Error (`Exit_non_zero i) ->
+            let err = "Abnormal exit code for build worker on host " ^ hostname ^ ". Code: " ^ string_of_int i in
+            Pipe.write opam_err err >>= fun () ->
+            Pipe.write error_writer (Error.of_string err)
+          | Error (`Signal s) ->
+            let err = "Abnormal exit signal for build worker on host " ^ hostname ^
+                      ". Signal: " ^ Signal.to_string s in
+            Pipe.write opam_err err >>= fun () ->
+            Pipe.write error_writer (Error.of_string err)) >>= fun () ->
+      let pstdin = Process.stdin p in
+      Monitor.detach (Writer.monitor pstdin);
+      Writer.write pstdin "done\n";
+      pipe >>= fun () ->
+      Process.wait p >>= function
+      | Ok () -> Deferred.unit
+      | Error (`Exit_non_zero i) ->
+        Pipe.write error_writer @@ Error.createf "Compile alloc protocol error: Abnormal exit code: %d" i
+      | Error (`Signal s) ->
+        Pipe.write error_writer @@ Error.createf "Compile alloc protocol error: Abnormal signal: %s" @@
+        Signal.to_string s
     in
-    Pipe.write opam_timings str >>= fun () ->
-    finish
-  | _ ->
-    Pipe.write error_writer (Error.of_string "Initial build did not fully complete") >>= fun () ->
-    finish
+    match Base.Queue.to_list timings with
+    | [`Total_install_time total_install_time,
+       `Target_install_time target_install_time,
+       `Deps_install_time deps_install_time,
+       `Subject_install_time subject_install_time] ->
+      let str =
+        "Total install time: " ^ Time_ns.Span.to_string_hum total_install_time ^ "\n" ^
+        "Target install time: " ^ Time_ns.Span.to_string_hum target_install_time ^ "\n" ^
+        "Deps install time: " ^ Time_ns.Span.to_string_hum deps_install_time ^ "\n" ^
+        "Subject install time: " ^ Time_ns.Span.to_string_hum subject_install_time ^ "\n"
+      in
+      Pipe.write opam_timings str >>= fun () ->
+      finish
+    | _ ->
+      Pipe.write error_writer (Error.of_string "Initial build did not fully complete") >>= fun () ->
+      finish
 
 let write_bench_params ~scratch =
   let (/) = Filename.concat in
@@ -450,7 +480,7 @@ let reporter ~lemma_time ~info_stream ~bench_log ~resources_requested ~resources
       (if !complete then "complete" else "incomplete")
       (resources_requested ()) (resources_total () - resources_requested ()) (jobs_running ())
       in
-  Clock.every (Time.Span.of_min 1.) summarize;
+  Clock_ns.every Time_ns.Span.minute summarize;
   don't_wait_for @@ Pipe.iter info_stream ~f:(fun ({ lemmas; _ } : pre_bench_info) ->
       total := !total + List.length lemmas; Deferred.unit);
   Deferred.upon (Pipe.closed info_stream) (fun () -> complete := true);
@@ -803,7 +833,7 @@ let main
     ~injections_extra
     ~scratch
     ~delay_benchmark
-    ~bench_allocator ~compile_allocator:_ ~max_requests ~max_running
+    ~bench_allocator ~compile_allocator ~max_requests ~max_running
     ~benchmark_data
     ~benchmark_target
     ~benchmark_repo
@@ -832,6 +862,7 @@ let main
    write_injections ~data_dir ~injections_extra >>= fun () ->
    compile_and_retrieve_benchmark_info
      ~error_writer ~error_occurred
+     ~compile_allocator
      ~opam_out ~opam_err ~opam_timings
      ~root_dir:(scratch/"opam-root")
      ~benchmark_target
