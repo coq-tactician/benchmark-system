@@ -162,7 +162,8 @@ type pre_bench_info =
   ; args   : string array
   ; env    : string array
   ; dir    : string
-  ; lemmas : string list }
+  ; lemmas : string list
+  ; time   : float }
 [@@deriving bin_io]
 
 exception CompilationError
