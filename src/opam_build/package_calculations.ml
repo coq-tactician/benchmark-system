@@ -3,7 +3,7 @@ let calculate ~root_dir () =
     ~root_dir
     ~yes:(Some true)
     ~no_env_notice:true
-    (* ~best_effort:true *)
+    ~best_effort:true
     ~solver:(lazy (module OpamCudfSolver.Mccs))
     ~solver_timeout:None
     ();
