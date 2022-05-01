@@ -6,14 +6,27 @@ let calculate ~root_dir () =
     ~best_effort:true
     ~solver:(lazy (module OpamCudfSolver.Mccs))
     ~solver_timeout:None
+    ~fake:true
     ();
   let gt, rt, _ = Opam_benchmark.init_root () in
-  let repos =
-    List.map (fun (name, _) -> OpamRepositoryName.of_string name) Opam_benchmark.repos @
-    [ OpamRepositoryName.of_string "default" ] in
+  (* let repos = *)
+  (*   List.map (fun (name, _) -> OpamRepositoryName.of_string name) Opam_benchmark.repos @ *)
+  (*   [ OpamRepositoryName.of_string "default" ] in *)
   let pkgs = OpamPackage.keys @@
     OpamRepositoryName.Map.find (OpamRepositoryName.of_string "coq-released") rt.repo_opams in
-  let st = OpamSwitchState.load_virtual ?repos_list:(Some repos) gt rt in
+  (* let st = OpamSwitchState.load_virtual ?repos_list:(Some repos) gt rt in *)
+  let switch = OpamSwitch.of_string "calculation" in
+  let gt =
+    if OpamGlobalState.switch_exists gt switch then
+      OpamSwitchCommand.remove ~confirm:false gt switch else
+      gt in
+  let (), st = OpamSwitchCommand.create gt ~rt ~update_config:false
+      ~invariant:OpamFormula.(And (
+          Atom ((OpamPackage.Name.of_string "coq-tactician"), Atom (`Eq, OpamPackage.Version.of_string "8.11.dev")),
+          Atom ((OpamPackage.Name.of_string "ocaml-base-compiler"), Empty)
+        ))
+      switch
+      (fun st -> (), st) in
   let pkgs = OpamSolver.coinstallable_subset
       (OpamSwitchState.universe st ~requested:OpamPackage.Set.empty Query)
       (OpamPackage.Set.singleton
