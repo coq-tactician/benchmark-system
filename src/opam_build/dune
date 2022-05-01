@@ -1,6 +1,6 @@
 (library
  (name opam_build)
- (modules opam_benchmark)
+ (modules opam_benchmark package_calculations)
  (libraries
    core async opam-client)
  (preprocess (pps ppx_jane))

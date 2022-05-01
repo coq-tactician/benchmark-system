@@ -99,8 +99,8 @@ let build_switch_for_benchmark
         let request = OpamSolver.request ~install:[tactician_stdlib_package, None] () in
         let stdlib_installable =
           OpamSolution.resolve st Install
-            ~orphans:OpamPackage.Set.empty
-            ~requested:(OpamPackage.Name.Set.singleton tactician_stdlib_package)
+            (* ~orphans:OpamPackage.Set.empty *)
+            ~requested:(OpamPackage.Set.empty)
             request in
         match stdlib_installable with
         | OpamTypes.Success _ ->
