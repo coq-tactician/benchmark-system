@@ -25,7 +25,7 @@ let calculate ~root_dir () =
   print_endline "\n";
   OpamPackage.Set.iter (fun p -> print_string @@ (OpamPackage.to_string p ^ "\n")) pkgs;
   print_endline "\n";
-  let base_compiler = OpamPackage.create (OpamPackage.Name.of_string "ocaml-base-compiler") (OpamPackage.Version.of_string "4.01.1") in
+  let base_compiler = OpamPackage.create (OpamPackage.Name.of_string "ocaml-base-compiler") (OpamPackage.Version.of_string "4.10.2") in
   let coq = OpamPackage.create (OpamPackage.Name.of_string "coq") (OpamPackage.Version.of_string "8.11.2") in
   let pkgs = OpamPackage.Set.add base_compiler @@ OpamPackage.Set.singleton coq in
   let request = OpamSolver.request
