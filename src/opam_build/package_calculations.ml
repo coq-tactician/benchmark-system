@@ -38,9 +38,15 @@ let calculate ~root_dir () =
   print_endline "\n";
   OpamPackage.Set.iter (fun p -> print_string @@ (OpamPackage.to_string p ^ "\n")) pkgs;
   print_endline "\n";
-  let base_compiler = OpamPackage.create (OpamPackage.Name.of_string "ocaml-base-compiler") (OpamPackage.Version.of_string "4.10.2") in
-  let coq = OpamPackage.create (OpamPackage.Name.of_string "coq") (OpamPackage.Version.of_string "8.11.2") in
-  let pkgs = OpamPackage.Set.add base_compiler @@ OpamPackage.Set.singleton coq in
+  (* let base_compiler = OpamPackage.create (OpamPackage.Name.of_string "ocaml-base-compiler") (OpamPackage.Version.of_string "4.10.2") in *)
+  (* let coq = OpamPackage.create (OpamPackage.Name.of_string "coq") (OpamPackage.Version.of_string "8.11.2") in *)
+  (* let pkgs = OpamPackage.Set.add base_compiler @@ OpamPackage.Set.singleton coq in *)
+  (* let rec take i ls = *)
+  (*   match i, ls with *)
+  (*   | 0, _ -> [] *)
+  (*   | _, [] -> [] *)
+  (*   | _, x::ls -> x :: take (i-1) ls in *)
+  (* let pkgs = OpamPackage.Set.of_list @@ take  @@ OpamPackage.Set.elements pkgs in *)
   let request = OpamSolver.request
       ~install:(OpamSolution.eq_atoms_of_packages pkgs) () in
   let solution = OpamSolver.resolve
