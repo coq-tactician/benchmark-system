@@ -174,8 +174,9 @@ end
 
 let remote_how invocation =
   let open Rpc_parallel in
-  How_to_run.wrap How_to_run.local ~f:(fun { prog; args } ->
-      let inv = invocation @ prog :: args in
+  How_to_run.wrap How_to_run.local ~f:(fun { prog=_; args } ->
+      (* A bit a a hack to get the right executable name into the invocation *)
+      let inv = invocation @ (Sys.get_argv ()).(0) :: args in
       print_endline ("Invocation: " ^ String.concat ~sep:" " inv);
       let prog = List.hd_exn inv in
       let args = List.tl_exn inv in
