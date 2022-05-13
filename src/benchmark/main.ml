@@ -425,7 +425,6 @@ let compile_and_retrieve_benchmark_info
     r1,
     Pipe.read_all r2 >>= fun timings ->
     let finish =
-      print_endline "rsyncing data back to base";
       wait_for_data ~hostname:final_data_host ~time:(Counter.count last_abstract_time) >>= fun () ->
       data_host := final_data_host;
       remove_job ~job_name ~hostname;
@@ -917,35 +916,29 @@ let main
          ; Deferred.choice error_occurred (fun () -> `Error) ] >>= function
        | `Error -> Deferred.unit
        | `Time tcurr ->
-         print_endline "received";
-         if tcurr >= t then (print_endline "done"; Deferred.unit) else (print_endline "continue"; wait_for_time t) in
+         if tcurr >= t then Deferred.unit else wait_for_time t in
      let host_abstract_time = ref 0 in
      let rec loop () =
        Mvar.take reqs >>= fun t ->
-       print_endline ("loop request time " ^ string_of_int t);
        let synced_time = Counter.count last_abstract_time in
-       print_endline ("synced time " ^ string_of_int synced_time);
        (if !host_abstract_time >= t then Deferred.unit else
         (if not @@ String.equal target !data_host then begin
-           print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target);
+           print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target ^ " at time " ^ string_of_int t ^ "/" ^ string_of_int (Counter.count last_abstract_time));
            Process.run
              ~prog:"ssh"
-             ~args:[target; "rsync"; "-az"; !data_host^":"^scratch^"/"; scratch^"/"] () >>= function
+             ~args:[target; "rsync"; "-qaz"; !data_host^":"^scratch^"/"; scratch^"/"] () >>= function
            | Error e ->
              Pipe.write error_writer e
-           | Ok out ->
-             print_endline out;
+           | Ok _out ->
              Deferred.unit end
          else Deferred.unit) >>| fun () ->
         host_abstract_time := synced_time) >>= fun () ->
-       print_endline ("broadcasting " ^ string_of_int !host_abstract_time);
        Bvar.broadcast update !host_abstract_time;
        loop ()
      in
      (* TODO: This is most likely a memory leak, because the loop never stops *)
      don't_wait_for (loop ());
      fun time ->
-       print_endline ("waiting for time " ^ string_of_int time);
        Mvar.update reqs ~f:(function
            | None -> time
            | Some time' -> Int.max time time');
