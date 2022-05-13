@@ -371,7 +371,8 @@ let compile_and_retrieve_benchmark_info
     ~opam_out ~opam_err ~opam_timings
     ~root_dir
     ~benchmark_target
-    ~benchmark_url
+    ~benchmark_repo
+    ~benchmark_commit
     ~packages
     ~injections_extra
     ~add_job ~remove_job ~data_host ~wait_for_data ~last_abstract_time =
@@ -379,7 +380,7 @@ let compile_and_retrieve_benchmark_info
   let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
   Process.create
     ~prog:"setsid"
-    ~args:["-w"; compile_allocator]
+    ~args:["-w"; compile_allocator; benchmark_commit]
     () >>=? fun p ->
   Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Group (Process.pid p)));
   let pipe = Reader.transfer (Process.stderr p) stderr in
@@ -418,7 +419,7 @@ let compile_and_retrieve_benchmark_info
     data_host := hostname;
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
-      ~arg:{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } >>|? fun r ->
+      ~arg:{ root_dir; benchmark_target; benchmark_url = benchmark_repo^"#"^benchmark_commit; packages; injections_extra } >>|? fun r ->
     let r1, r2 = Pipe.fork ~pushback_uses:`Fast_consumer_only r in
     let r1 = Pipe.filter_map r1 ~f:(function | `Info info -> Some info | `Timings _ -> None) in
     let r2 = Pipe.filter_map r2 ~f:(function | `Info _ -> None | `Timings timings -> Some timings) in
@@ -611,14 +612,15 @@ let alloc_benchers =
     ~relinquish_alloc_token ~relinquish_running_token
     ~abort ~error_writer
     ~bench_allocator
-    ~job_starter ->
+    ~job_starter
+    ~benchmark_commit ->
     let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
     let error_if_not_aborted e =
       if Deferred.is_determined abort then Deferred.Or_error.ok_unit else
         Deferred.Or_error.fail e in
     (Process.create
        ~prog:"setsid"
-       ~args:["-w"; bench_allocator]
+       ~args:["-w"; bench_allocator; benchmark_commit]
        () >>=? fun p ->
      Deferred.upon abort (fun () -> Signal.send_i Signal.int (`Group (Process.pid p)));
      let pipe = Reader.transfer (Process.stderr p) stderr in
@@ -971,7 +973,8 @@ let main
      ~opam_out ~opam_err ~opam_timings
      ~root_dir:(scratch/"opam-root")
      ~benchmark_target
-     ~benchmark_url:(benchmark_repo ^ "#" ^ benchmark_commit)
+     ~benchmark_repo
+     ~benchmark_commit
      ~packages
      ~injections_extra
      ~add_job ~remove_job ~data_host ~wait_for_data ~last_abstract_time
@@ -1004,7 +1007,8 @@ let main
        alloc_benchers
          ~task_allocator
          ~abort ~error_writer
-         ~bench_allocator ~job_starter in
+         ~bench_allocator ~job_starter
+         ~benchmark_commit in
      let request_allocate = ResourceManager.merge resources_requested_queue resources_total_queue in
      task_disseminator
        ~alloc_benchers
