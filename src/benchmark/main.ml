@@ -172,7 +172,16 @@ module Cmd_worker = struct
   include Rpc_parallel.Make (T)
 end
 
+let remote_how invocation =
+  let open Rpc_parallel in
+  How_to_run.wrap How_to_run.local ~f:(fun { prog; args } ->
+      let inv = invocation @ prog :: args in
+      let prog = List.hd_exn inv in
+      let args = List.tl_exn inv in
+      { prog; args })
+
 let run_processor
+    ~invocation
     ~error_writer ~error_occurred
     ~task_allocator
     ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name =
@@ -180,6 +189,7 @@ let run_processor
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let did_something = ref false in
   (Cmd_worker.spawn_in_foreground
+     ~how:(remote_how invocation)
      ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
      ~shutdown_on:Connection_closed
      { name = job_name }
@@ -364,8 +374,10 @@ let compile_and_retrieve_benchmark_info
   Ivar.fill stop_clock ();
   match line with
   | `Eof -> Deferred.Or_error.fail @@ Error.createf "Compile alloc protocol error: Unexpected eof"
-  | `Ok _invocation ->
+  | `Ok invocation ->
+    let invocation = Arg_parser.split invocation in
     Build_worker.spawn_in_foreground
+      ~how:(remote_how invocation)
       ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
       ~shutdown_on:Connection_closed
       ()
@@ -630,6 +642,7 @@ let alloc_benchers =
            if String.equal "done" invocation then
              cont
            else
+             let invocation = Arg_parser.split invocation in
              let job = job_starter
                  ~task_allocator
                  ~job_time:(Time_ns.Span.of_sec (float_of_int time))
@@ -988,9 +1001,10 @@ let main
          ~resources_total:(fun () -> ResourceManager.taken resources_total_queue)
          ~jobs_running:(fun () -> Counter.count jobs_running) in
      (if delay_benchmark then cont else Deferred.unit) >>= fun () ->
-     let job_starter ~task_allocator ~job_time ~invocation:_ ~job_name =
+     let job_starter ~task_allocator ~job_time ~invocation ~job_name =
        Counter.increase jobs_running;
        run_processor
+         ~invocation
          ~error_writer ~error_occurred
          ~task_allocator
          ~reporter ~coq_out ~coq_err ~processor_out ~processor_err
