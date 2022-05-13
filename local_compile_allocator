@@ -1,0 +1,4 @@
+#!/bin/bash
+# For allocated resources, this is the command line invocation to run a program within those resources.
+# For local allocation, nothing needs to happen.
+echo "";
