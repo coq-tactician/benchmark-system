@@ -407,15 +407,16 @@ let compile_and_retrieve_benchmark_info
     r1,
     Pipe.read_all r2 >>= fun timings ->
     let finish =
-      (if String.equal final_data_host hostname then Deferred.unit else
-         Process.run
-           ~prog:"rsync"
-           ~args:["-az"; hostname^":"^root_dir; root_dir] () >>= function
-         | Error e ->
-           Pipe.write error_writer e
-         | Ok out ->
-           print_endline out;
-           Deferred.unit) >>= fun () ->
+      (if String.equal final_data_host hostname then Deferred.unit else begin
+          print_endline "rsyncing data back to base";
+          Process.run
+            ~prog:"rsync"
+            ~args:["-az"; hostname^":"^root_dir; root_dir] () >>= function
+          | Error e ->
+            Pipe.write error_writer e
+          | Ok out ->
+            print_endline out;
+            Deferred.unit end) >>= fun () ->
       data_host := final_data_host;
       remove_job ~job_name ~hostname;
       Build_worker.Connection.close conn >>= fun () ->
@@ -931,16 +932,17 @@ let main
        let synced_time = Counter.count last_abstract_time in
        print_endline ("synced time " ^ string_of_int synced_time);
        (if !host_abstract_time >= t then Deferred.unit else
-        (if not @@ String.equal target !data_host then
-          Process.run
-            ~prog:"ssh"
-            ~args:[target; "rsync"; "-az"; !data_host^":"^scratch; scratch] () >>= function
-          | Error e ->
-            Pipe.write error_writer e
-          | Ok out ->
-            print_endline out;
-            Deferred.unit
-        else Deferred.unit) >>| fun () ->
+        (if not @@ String.equal target !data_host then begin
+           print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target);
+           Process.run
+             ~prog:"ssh"
+             ~args:[target; "rsync"; "-az"; !data_host^":"^scratch; scratch] () >>= function
+           | Error e ->
+             Pipe.write error_writer e
+           | Ok out ->
+             print_endline out;
+             Deferred.unit end
+         else Deferred.unit) >>| fun () ->
         host_abstract_time := synced_time) >>= fun () ->
        print_endline ("broadcasting " ^ string_of_int !host_abstract_time);
        Bvar.broadcast update !host_abstract_time;
