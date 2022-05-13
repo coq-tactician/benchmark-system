@@ -928,9 +928,18 @@ let main
        (if !host_abstract_time >= t then Deferred.unit else
         (if not @@ String.equal target !data_host then begin
            print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target ^ " at time " ^ string_of_int t ^ "/" ^ string_of_int (Counter.count last_abstract_time));
+           let exclude =
+             [ "opam-root/bench/.opam-switch/sources"
+             ; "opam-root/bench/.opam-switch/build/coq.*"
+             ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
+             ; "opam-root/bench/.opam-switch/build/dune.*"
+             ; "opam-root/bench/.opam-switch/build/dose3.*"
+             ; "opam-root/download-cache" ] in
+           let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
+           let args = [ target; "rsync"; "qaz" ] @ exclude @ [ !data_host^":"^scratch^"/"; scratch^"/" ] in
            Process.run
              ~prog:"ssh"
-             ~args:[target; "rsync"; "-qaz"; !data_host^":"^scratch^"/"; scratch^"/"] () >>= function
+             ~args () >>= function
            | Error e ->
              Pipe.write error_writer e
            | Ok _out ->
