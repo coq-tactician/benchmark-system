@@ -20,7 +20,7 @@ export OPAMROOT=~/.opam
 eval $(opam env)
 
 EXIT_CODE=0
-srun --job-name="$NAME" --cpus-per-task=30 --time=04:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
+srun --job-name="$NAME" --cpus-per-task=30 --time=08:00:00 --mem-per-cpu=4000 --partition compute --ntasks=1 \
      tactician-benchmark /home/blaaulas/tactician/benchmark-data/ \
      "$TARGET" "$REPO" "$COMMIT" "$TIME" 15 "$PACKAGE" -tmp-dir /lscratch/blaaulas/ -delay-benchmark \
     || EXIT_CODE=$?
