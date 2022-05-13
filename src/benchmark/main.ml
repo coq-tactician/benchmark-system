@@ -416,6 +416,7 @@ let compile_and_retrieve_benchmark_info
     let job_name = "compile_job" in
     add_job ~job_name ~hostname;
     let final_data_host = !data_host in
+    wait_for_data ~hostname ~time:0 >>= fun () ->
     data_host := hostname;
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
