@@ -930,7 +930,7 @@ let main
            print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target);
            Process.run
              ~prog:"ssh"
-             ~args:[target; "rsync"; "-az"; !data_host^":"^scratch; scratch] () >>= function
+             ~args:[target; "rsync"; "-az"; !data_host^":"^scratch^"/"; scratch^"/"] () >>= function
            | Error e ->
              Pipe.write error_writer e
            | Ok out ->
