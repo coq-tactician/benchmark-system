@@ -416,7 +416,8 @@ let compile_and_retrieve_benchmark_info
     let job_name = "compile_job" in
     add_job ~job_name ~hostname;
     let final_data_host = !data_host in
-    wait_for_data ~hostname ~time:0 >>= fun () ->
+    (* Make sure the initial data is copied over in case the build directory is being reused *)
+    wait_for_data ~hostname ~time:1 >>= fun () ->
     data_host := hostname;
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
@@ -907,7 +908,7 @@ let main
    with_log_writer (data_dir/"combined.bench") @@ fun bench_log ->
    write_injections ~data_dir ~injections_extra >>= fun () ->
 
-   let last_abstract_time = Counter.make 0 in
+   let last_abstract_time = Counter.make 1 in
    let data_host = ref @@ Unix.gethostname () in
    let hosts = ref String.Map.empty in
    let copier target =
