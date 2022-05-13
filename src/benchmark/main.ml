@@ -38,6 +38,22 @@ type exec_info =
   ; dir    : string }
 [@@deriving bin_io]
 
+module Counter : sig
+  type t
+  val make : int -> t
+  val increase : t -> unit
+  val decrease : t -> unit
+  val count : t -> int
+end = struct
+  type t = int ref
+  let make i = ref i
+  let increase c = c := !c + 1
+  let decrease c =
+    assert (!c > 0);
+    c := !c - 1
+  let count c = !c
+end
+
 module Cmd_worker = struct
   module T = struct
 
@@ -358,7 +374,7 @@ let compile_and_retrieve_benchmark_info
     ~benchmark_url
     ~packages
     ~injections_extra
-    ~add_job ~remove_job ~data_host =
+    ~add_job ~remove_job ~data_host ~wait_for_data ~last_abstract_time =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
   Process.create
@@ -409,16 +425,8 @@ let compile_and_retrieve_benchmark_info
     r1,
     Pipe.read_all r2 >>= fun timings ->
     let finish =
-      (if String.equal final_data_host hostname then Deferred.unit else begin
-          print_endline "rsyncing data back to base";
-          Process.run
-            ~prog:"rsync"
-            ~args:["-az"; hostname^":"^root_dir; root_dir] () >>= function
-          | Error e ->
-            Pipe.write error_writer e
-          | Ok out ->
-            print_endline out;
-            Deferred.unit end) >>= fun () ->
+      print_endline "rsyncing data back to base";
+      wait_for_data ~hostname:final_data_host ~time:(Counter.count last_abstract_time) >>= fun () ->
       data_host := final_data_host;
       remove_job ~job_name ~hostname;
       Build_worker.Connection.close conn >>= fun () ->
@@ -592,22 +600,6 @@ let commit
   Deferred.Or_error.ok_unit) >>= function
   | Ok () -> Deferred.unit
   | Error e -> Pipe.write error_writer e
-
-module Counter : sig
-  type t
-  val make : int -> t
-  val increase : t -> unit
-  val decrease : t -> unit
-  val count : t -> int
-end = struct
-  type t = int ref
-  let make i = ref i
-  let increase c = c := !c + 1
-  let decrease c =
-    assert (!c > 0);
-    c := !c - 1
-  let count c = !c
-end
 
 let alloc_benchers =
   let mk_id =
@@ -977,7 +969,8 @@ let main
    let wait_for_data ~hostname ~time =
      (String.Map.find_exn !hosts hostname).wait_for_data time in
    (* This job is running the entire session *)
-   add_job ~job_name:"main_job" ~hostname:(Unix.gethostname ());
+   let main_job = "main_job" in
+   add_job ~job_name:main_job ~hostname:(Unix.gethostname ());
 
    compile_and_retrieve_benchmark_info
      ~error_writer ~error_occurred
@@ -988,7 +981,7 @@ let main
      ~benchmark_url:(benchmark_repo ^ "#" ^ benchmark_commit)
      ~packages
      ~injections_extra
-     ~add_job ~remove_job ~data_host
+     ~add_job ~remove_job ~data_host ~wait_for_data ~last_abstract_time
    >>= function
    | Error e ->
      Pipe.write error_writer e
