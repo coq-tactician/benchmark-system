@@ -1,3 +1,3 @@
 # For allocated resources, this is the command line invocation to run a program within those resources.
-echo "srun --jobid $JOBID"
+echo "srun --ntasks=1 --jobid $SLURM_JOB_ID"
 read
