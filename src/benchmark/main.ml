@@ -175,14 +175,14 @@ end
 let run_processor
     ~error_writer ~error_occurred
     ~task_allocator
-    ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~name =
+    ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name =
   let deadline = Time_ns.add (Time_ns.now ()) job_time in
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let did_something = ref false in
   (Cmd_worker.spawn_in_foreground
      ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
      ~shutdown_on:Connection_closed
-     { name }
+     { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
    don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn);
@@ -195,7 +195,7 @@ let run_processor
      ~f:Cmd_worker.functions.hostname
      ~arg:() >>=? fun hostname ->
    let rec loop () =
-     task_allocator deadline >>= function
+     task_allocator ~job_name ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
        let continue lemma =
@@ -252,11 +252,13 @@ let run_processor
    Process.wait process >>= function
    | Ok () -> Deferred.Or_error.ok_unit
    | Error (`Exit_non_zero i) ->
-     let err = "Abnormal exit code for command worker: " ^ name ^ " on host " ^ hostname ^ ". Code: " ^ string_of_int i in
+     let err = "Abnormal exit code for command worker: " ^ job_name ^ " on host " ^
+               hostname ^ ". Code: " ^ string_of_int i in
      Pipe.write processor_err err >>= fun () ->
      Deferred.Or_error.fail (Error.of_string err)
    | Error (`Signal s) ->
-     let err = "Abnormal exit signal for command worker: " ^ name ^ " on host " ^ hostname ^ ". Signal: " ^ Signal.to_string s in
+     let err = "Abnormal exit signal for command worker: " ^ job_name ^ " on host " ^
+               hostname ^ ". Signal: " ^ Signal.to_string s in
      Pipe.write processor_err err >>= fun () ->
      Deferred.Or_error.fail (Error.of_string err))
   >>= function
@@ -343,7 +345,8 @@ let compile_and_retrieve_benchmark_info
     ~benchmark_target
     ~benchmark_url
     ~packages
-    ~injections_extra =
+    ~injections_extra
+    ~add_job ~remove_job ~data_host =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
   Process.create
@@ -379,6 +382,10 @@ let compile_and_retrieve_benchmark_info
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.hostname
       ~arg:() >>=? fun hostname ->
+    let job_name = "compile_job" in
+    add_job ~job_name ~hostname;
+    let final_data_host = !data_host in
+    data_host := hostname;
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
       ~arg:{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } >>|? fun r ->
@@ -388,6 +395,17 @@ let compile_and_retrieve_benchmark_info
     r1,
     Pipe.read_all r2 >>= fun timings ->
     let finish =
+      (if String.equal final_data_host hostname then Deferred.unit else
+         Process.run
+           ~prog:"rsync"
+           ~args:["-az"; hostname^":"^root_dir; root_dir] () >>= function
+         | Error e ->
+           Pipe.write error_writer e
+         | Ok out ->
+           print_endline out;
+           Deferred.unit) >>= fun () ->
+      data_host := final_data_host;
+      remove_job ~job_name ~hostname;
       Build_worker.Connection.close conn >>= fun () ->
       Deferred.all_unit pipes >>= fun () ->
       Process.wait process >>= (function
@@ -560,58 +578,80 @@ let commit
   | Ok () -> Deferred.unit
   | Error e -> Pipe.write error_writer e
 
-let alloc_benchers
-    ~task_allocator
+module Counter : sig
+  type t
+  val make : int -> t
+  val increase : t -> unit
+  val decrease : t -> unit
+  val count : t -> int
+end = struct
+  type t = int ref
+  let make i = ref i
+  let increase c = c := !c + 1
+  let decrease c =
+    assert (!c > 0);
+    c := !c - 1
+  let count c = !c
+end
+
+let alloc_benchers =
+  let mk_id =
+    let id = Counter.make 0 in
+    fun () ->
+      let res = Counter.count id in
+      Counter.increase id;
+      res in
+  fun ~task_allocator
     ~relinquish_alloc_token ~relinquish_running_token
     ~abort ~error_writer
     ~bench_allocator
-    ~job_starter =
-  let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
-  let error_if_not_aborted e =
-    if Deferred.is_determined abort then Deferred.Or_error.ok_unit else
-      Deferred.Or_error.fail e in
-  (Process.create
-     ~prog:"setsid"
-     ~args:["-w"; bench_allocator]
-     () >>=? fun p ->
-   Deferred.upon abort (fun () -> Signal.send_i Signal.int (`Group (Process.pid p)));
-   let pipe = Reader.transfer (Process.stderr p) stderr in
-   let stdout = Process.stdout p in
-   Reader.read_line stdout >>= function
-   | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
-   | `Ok time ->
-     (match int_of_string_opt time with
-      | None -> Deferred.Or_error.errorf "Alloc protocol error: Int expected, got %s" time
-      | Some time -> Deferred.Or_error.return time) >>=? fun time ->
-     let rec loop i cont =
-       Reader.read_line stdout >>= function
-       | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
-       | `Ok invocation ->
-         if String.equal "done" invocation then
-           cont
-         else
-           let job = job_starter
-             ~task_allocator
-             ~job_time:(Time_ns.Span.of_sec (float_of_int time))
-             ~invocation ~name:("job" ^ string_of_int i) >>| fun () -> Or_error.return () in
-           loop (i + 1) (cont >>=? fun () -> job) in
-     let cont = loop 0 Deferred.Or_error.ok_unit in
-     relinquish_alloc_token ();
-     cont >>=? fun () ->
-     let stdin = Process.stdin p in
-     Monitor.detach (Writer.monitor stdin);
-     Writer.write stdin "done\n";
-     pipe >>= fun () ->
-     Process.wait p >>= function
-     | Ok () ->
-       relinquish_running_token ();
-       Deferred.Or_error.ok_unit
-     | Error (`Exit_non_zero i) ->
-       Deferred.Or_error.errorf "Alloc protocol error: Abnormal exit code: %d" i
-     | Error (`Signal s) ->
-       Deferred.Or_error.errorf "Alloc protocol error: Abnormal signal: %s" @@ Signal.to_string s) >>= function
-  | Ok () -> Deferred.unit
-  | Error e -> Pipe.write error_writer e
+    ~job_starter ->
+    let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
+    let error_if_not_aborted e =
+      if Deferred.is_determined abort then Deferred.Or_error.ok_unit else
+        Deferred.Or_error.fail e in
+    (Process.create
+       ~prog:"setsid"
+       ~args:["-w"; bench_allocator]
+       () >>=? fun p ->
+     Deferred.upon abort (fun () -> Signal.send_i Signal.int (`Group (Process.pid p)));
+     let pipe = Reader.transfer (Process.stderr p) stderr in
+     let stdout = Process.stdout p in
+     Reader.read_line stdout >>= function
+     | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
+     | `Ok time ->
+       (match int_of_string_opt time with
+        | None -> Deferred.Or_error.errorf "Alloc protocol error: Int expected, got %s" time
+        | Some time -> Deferred.Or_error.return time) >>=? fun time ->
+       let rec loop cont =
+         Reader.read_line stdout >>= function
+         | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
+         | `Ok invocation ->
+           if String.equal "done" invocation then
+             cont
+           else
+             let job = job_starter
+                 ~task_allocator
+                 ~job_time:(Time_ns.Span.of_sec (float_of_int time))
+                 ~invocation ~job_name:("job" ^ string_of_int (mk_id ())) >>| fun () -> Or_error.return () in
+             loop (cont >>=? fun () -> job) in
+       let cont = loop Deferred.Or_error.ok_unit in
+       relinquish_alloc_token ();
+       cont >>=? fun () ->
+       let stdin = Process.stdin p in
+       Monitor.detach (Writer.monitor stdin);
+       Writer.write stdin "done\n";
+       pipe >>= fun () ->
+       Process.wait p >>= function
+       | Ok () ->
+         relinquish_running_token ();
+         Deferred.Or_error.ok_unit
+       | Error (`Exit_non_zero i) ->
+         Deferred.Or_error.errorf "Alloc protocol error: Abnormal exit code: %d" i
+       | Error (`Signal s) ->
+         Deferred.Or_error.errorf "Alloc protocol error: Abnormal signal: %s" @@ Signal.to_string s) >>= function
+    | Ok () -> Deferred.unit
+    | Error e -> Pipe.write error_writer e
 
 module ResourceManager : sig
   type ('size, 'taken, 'release) t
@@ -721,34 +761,26 @@ end = struct
   let finished { finished; _ } = finished ()
 end
 
-module Counter : sig
-  type t
-  val make : int -> t
-  val increase : t -> unit
-  val decrease : t -> unit
-  val count : t -> int
-end = struct
-  type t = int ref
-  let make i = ref i
-  let increase c = c := !c + 1
-  let decrease c =
-    assert (!c > 0);
-    c := !c - 1
-  let count c = !c
-end
+type host_data =
+  { jobs : String.Set.t
+  ; wait_for_data : int -> unit Deferred.t }
 
 type compile_unit_data =
   { exec_info          : exec_info
   ; lemma_disseminator : (Time_ns.t * string * bench_response Ivar.t) Pipe.Writer.t
   ; executors          : Counter.t
-  ; lemma_count        : unit -> int }
+  ; lemma_count        : unit -> int
+  ; abstract_time      : int }
 
 let task_disseminator
     ~alloc_benchers ~request_allocate
-    ~error_occurred ~info_stream ~lemma_time =
+    ~error_occurred ~info_stream ~lemma_time
+    ~with_job ~wait_for_data
+    ~last_abstract_time =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let lemma_time' = Time_ns.Span.of_sec @@ float_of_int lemma_time in
   let data = ref [] in
+
   let lemma_token_queue = ResourceManager.make_queue () in
   let time_remaining deadline =
     Time_ns.Span.(Time_ns.diff deadline (Time_ns.now ()) > lemma_time') in
@@ -777,12 +809,15 @@ let task_disseminator
          let lemmas = String.Map.of_alist_exn lemmas in
          if not @@ String.Map.is_empty lemmas then
            let lemma_disseminator, lemma_count = lemma_disseminator lemmas in
+           Counter.increase last_abstract_time;
            data := { exec_info = { exec; args; env; dir }
                    ; lemma_disseminator
                    ; executors = Counter.make 0
-                   ; lemma_count } :: !data) >>| fun () ->
+                   ; lemma_count
+                   ; abstract_time = Counter.count last_abstract_time } :: !data) >>| fun () ->
     ResourceManager.finish lemma_token_queue in
-  let task_allocator deadline =
+  let task_allocator ~job_name ~hostname deadline =
+    with_job ~job_name ~hostname @@ fun () ->
     let rec loop () =
       Deferred.choose
         [ Deferred.Choice.map (ResourceManager.allocate lemma_token_queue) ~f:(fun x -> `Available x)
@@ -803,9 +838,10 @@ let task_disseminator
         match task with
         | None ->
           Deferred.return `Stop
-        | Some { exec_info; executors; lemma_disseminator; _ } ->
+        | Some { exec_info; executors; lemma_disseminator; abstract_time; _ } ->
           Counter.increase executors;
-          Deferred.return (`Task ((fun () -> Counter.decrease executors), exec_info, lemma_disseminator)) in
+          wait_for_data ~hostname ~time:abstract_time >>| fun () ->
+          `Task ((fun () -> Counter.decrease executors), exec_info, lemma_disseminator) in
     loop () in
   let allocator =
     let q = ResourceManager.merge request_allocate lemma_token_queue in
@@ -860,6 +896,72 @@ let main
    with_log_pipe (data_dir/"processor-err.log") @@ fun processor_err ->
    with_log_writer (data_dir/"combined.bench") @@ fun bench_log ->
    write_injections ~data_dir ~injections_extra >>= fun () ->
+
+   let last_abstract_time = Counter.make 0 in
+   let data_host = ref @@ Unix.gethostname () in
+   let hosts = ref String.Map.empty in
+   let copier target =
+     let reqs = Mvar.create () in
+     let update = Bvar.create () in
+     let rec wait_for_time t =
+       Deferred.choose
+         [ Deferred.choice (Bvar.wait update) (fun t -> `Time t)
+         ; Deferred.choice error_occurred (fun () -> `Error) ] >>= function
+       | `Error -> Deferred.unit
+       | `Time tcurr ->
+         print_endline "received";
+         if tcurr >= t then (print_endline "done"; Deferred.unit) else (print_endline "continue"; wait_for_time t) in
+     let host_abstract_time = ref 0 in
+     let rec loop () =
+       Mvar.take reqs >>= fun t ->
+       print_endline ("loop request time " ^ string_of_int t);
+       let synced_time = Counter.count last_abstract_time in
+       print_endline ("synced time " ^ string_of_int synced_time);
+       (if !host_abstract_time >= t then Deferred.unit else
+        (if not @@ String.equal target !data_host then
+          Process.run
+            ~prog:"ssh"
+            ~args:[target; "rsync"; "-az"; !data_host^":"^scratch; scratch] () >>= function
+          | Error e ->
+            Pipe.write error_writer e
+          | Ok out ->
+            print_endline out;
+            Deferred.unit
+        else Deferred.unit) >>| fun () ->
+        host_abstract_time := synced_time) >>= fun () ->
+       print_endline ("broadcasting " ^ string_of_int !host_abstract_time);
+       Bvar.broadcast update !host_abstract_time;
+       loop ()
+     in
+     (* TODO: This is most likely a memory leak, because the loop never stops *)
+     don't_wait_for (loop ());
+     fun time ->
+       print_endline ("waiting for time " ^ string_of_int time);
+       Mvar.update reqs ~f:(function
+           | None -> time
+           | Some time' -> Int.max time time');
+       wait_for_time time in
+   let add_job ~job_name ~hostname =
+     hosts := String.Map.update !hosts hostname ~f:(function
+         | None -> { jobs = String.Set.singleton job_name
+                   ; wait_for_data = copier hostname }
+         | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name }) in
+   let remove_job ~job_name ~hostname =
+     hosts := String.Map.update !hosts hostname ~f:(function
+         | None -> assert false
+         | Some ({ jobs; _ } as data) ->
+           { data with jobs = String.Set.remove jobs job_name }) in
+   let with_job ~job_name ~hostname f =
+     add_job ~job_name ~hostname;
+     Monitor.protect ~finally:(fun () ->
+         remove_job ~job_name ~hostname;
+         Deferred.unit)
+       f in
+   let wait_for_data ~hostname ~time =
+     (String.Map.find_exn !hosts hostname).wait_for_data time in
+   (* This job is running the entire session *)
+   add_job ~job_name:"main_job" ~hostname:(Unix.gethostname ());
+
    compile_and_retrieve_benchmark_info
      ~error_writer ~error_occurred
      ~compile_allocator
@@ -869,6 +971,7 @@ let main
      ~benchmark_url:(benchmark_repo ^ "#" ^ benchmark_commit)
      ~packages
      ~injections_extra
+     ~add_job ~remove_job ~data_host
    >>= function
    | Error e ->
      Pipe.write error_writer e
@@ -885,13 +988,13 @@ let main
          ~resources_total:(fun () -> ResourceManager.taken resources_total_queue)
          ~jobs_running:(fun () -> Counter.count jobs_running) in
      (if delay_benchmark then cont else Deferred.unit) >>= fun () ->
-     let job_starter ~task_allocator ~job_time ~invocation:_ ~name =
+     let job_starter ~task_allocator ~job_time ~invocation:_ ~job_name =
        Counter.increase jobs_running;
        run_processor
          ~error_writer ~error_occurred
          ~task_allocator
          ~reporter ~coq_out ~coq_err ~processor_out ~processor_err
-         ~job_time ~name >>| fun () ->
+         ~job_time ~job_name >>| fun () ->
        Counter.decrease jobs_running in
      let alloc_benchers ~task_allocator ~abort =
        alloc_benchers
@@ -903,7 +1006,9 @@ let main
        ~alloc_benchers
        ~request_allocate
        ~error_occurred
-       ~info_stream ~lemma_time >>= fun () ->
+       ~info_stream ~lemma_time
+       ~with_job ~wait_for_data
+       ~last_abstract_time >>= fun () ->
      cont >>= summarize)
   >>= fun () ->
   commit ~error_writer ~data_dir ~benchmark_repo ~benchmark_commit >>= fun () ->
