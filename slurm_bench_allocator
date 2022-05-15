@@ -1,5 +1,5 @@
 #!/bin/bash
 # Allocate resources in SLURM for benchmarking processes
 scriptdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-salloc --job-name="cp$1" --cpus-per-task=16 --time=01:15:00 --mem-per-cpu=1000 --partition compute,bigmem \
-       --ntasks=1 --quiet $scriptdir/slurm_bench_allocator_sub
+salloc --job-name="be$1" --cpus-per-task=1 --time=01:15:00 --mem-per-cpu=4000 --partition compute,bigmem \
+       --ntasks=2 --quiet $scriptdir/slurm_bench_allocator_sub
