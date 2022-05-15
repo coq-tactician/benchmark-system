@@ -1,4 +1,5 @@
 #!/bin/bash
+# Allocate resources in SLURM for the initial Opam compilation of packages
 scriptdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 salloc --job-name="cp$1" --cpus-per-task=16 --time=01:00:00 --mem-per-cpu=1000 --partition compute,bigmem \
-        --ntasks=1 --quiet $scriptdir/slurm_compile_allocator_sub
+       --ntasks=1 --quiet $scriptdir/slurm_compile_allocator_sub
