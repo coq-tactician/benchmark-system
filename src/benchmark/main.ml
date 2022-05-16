@@ -937,7 +937,7 @@ let main
              ; "opam-root/download-cache"
              ; "opam-root/repo"] in
            let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
-           let args = [ target; "rsync"; "-qaz" ] @ exclude @ [ !data_host^":"^scratch^"/"; scratch^"/" ] in
+           let args = [ target; "rsync"; "-qa" ] @ exclude @ [ !data_host^":"^scratch^"/"; scratch^"/" ] in
            Process.run
              ~prog:"ssh"
              ~args () >>= function
