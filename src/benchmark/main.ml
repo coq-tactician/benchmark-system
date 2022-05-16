@@ -907,6 +907,7 @@ let main
    with_log_pipe (data_dir/"processor-err.log") @@ fun processor_err ->
    with_log_writer (data_dir/"combined.bench") @@ fun bench_log ->
    write_injections ~data_dir ~injections_extra >>= fun () ->
+   write_bench_params ~scratch >>= fun extra_args ->
 
    let last_abstract_time = Counter.make 1 in
    let data_host = ref @@ Unix.gethostname () in
@@ -994,7 +995,6 @@ let main
    | Error e ->
      Pipe.write error_writer e
    | Ok (info_stream, cont) ->
-     write_bench_params ~scratch >>= fun extra_args ->
      let info_stream = Pipe.map info_stream ~f:(fun ({ args; _ } as info) ->
          { info with args = Array.append args extra_args }) in
      let info_stream, reporter_stream = Pipe.fork ~pushback_uses:`Fast_consumer_only info_stream in
