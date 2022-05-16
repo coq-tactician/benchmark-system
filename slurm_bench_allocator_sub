@@ -2,7 +2,7 @@
 # Number of minutes a task is allowed to run; for a local task this should not be limited.
 echo 3600
 # For allocated resources, this is the command line invocation to run a program within those resources.
-echo "srun --ntasks=1 --jobid $SLURM_JOB_ID"
+echo "srun --ntasks=1 --cpus-per-task=1 --jobid $SLURM_JOB_ID"
 # Signals the end of the allocation protocol.
 echo "done"
 # Wait for the benchmark system to signal it is done with the resources
