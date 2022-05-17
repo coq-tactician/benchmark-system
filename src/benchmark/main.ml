@@ -417,7 +417,7 @@ let compile_and_retrieve_benchmark_info
     add_job ~job_name ~hostname;
     let final_data_host = !data_host in
     (* Make sure the initial data is copied over in case the build directory is being reused *)
-    wait_for_data ~hostname ~time:1 >>= fun () ->
+    wait_for_data ~full:true ~hostname ~time:1 >>= fun () ->
     data_host := hostname;
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
@@ -428,7 +428,7 @@ let compile_and_retrieve_benchmark_info
     r1,
     Pipe.read_all r2 >>= fun timings ->
     let finish =
-      wait_for_data ~hostname:final_data_host ~time:(Counter.count last_abstract_time) >>= fun () ->
+      wait_for_data ~full:true ~hostname:final_data_host ~time:(Counter.count last_abstract_time) >>= fun () ->
       data_host := final_data_host;
       remove_job ~job_name ~hostname;
       Build_worker.Connection.close conn >>= fun () ->
@@ -784,7 +784,7 @@ end
 
 type host_data =
   { jobs : String.Set.t
-  ; wait_for_data : int -> unit Deferred.t }
+  ; wait_for_data : full:bool -> int -> unit Deferred.t }
 
 type compile_unit_data =
   { exec_info          : exec_info
@@ -861,7 +861,7 @@ let task_disseminator
           Deferred.return `Stop
         | Some { exec_info; executors; lemma_disseminator; abstract_time; _ } ->
           Counter.increase executors;
-          wait_for_data ~hostname ~time:abstract_time >>| fun () ->
+          wait_for_data ~full:false ~hostname ~time:abstract_time >>| fun () ->
           `Task ((fun () -> Counter.decrease executors), exec_info, lemma_disseminator) in
     loop () in
   let allocator =
@@ -922,7 +922,7 @@ let main
    let last_abstract_time = Counter.make 1 in
    let data_host = ref @@ Unix.gethostname () in
    let hosts = ref String.Map.empty in
-   let copier target =
+   let copier ~full target =
      let reqs = Mvar.create () in
      let update = Bvar.create () in
      let rec wait_for_time t =
@@ -940,15 +940,16 @@ let main
         (if not @@ String.equal target !data_host then begin
            print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target ^ " at time " ^ string_of_int t ^ "/" ^ string_of_int (Counter.count last_abstract_time));
            let exclude =
-             [ "opam-root/bench/.opam-switch/sources"
-             ; "opam-root/bench/.opam-switch/build/coq.*"
-             ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
-             ; "opam-root/bench/.opam-switch/build/dune.*"
-             ; "opam-root/bench/.opam-switch/build/dose3.*"
-             ; "opam-root/download-cache"
-             ; "opam-root/repo"
-             ; "*.vo.bench"
-             ; "*.glob"] in
+             if full then [] else
+               [ "opam-root/bench/.opam-switch/sources"
+               ; "opam-root/bench/.opam-switch/build/coq.*"
+               ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
+               ; "opam-root/bench/.opam-switch/build/dune.*"
+               ; "opam-root/bench/.opam-switch/build/dose3.*"
+               ; "opam-root/download-cache"
+               ; "opam-root/repo"
+               ; "*.vo.bench"
+               ; "*.glob"] in
            let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
            let args = [ target; "rsync"; "-qa" ] @ exclude @ [ !data_host^":"^scratch^"/"; scratch^"/" ] in
            Process.run
@@ -973,7 +974,7 @@ let main
    let add_job ~job_name ~hostname =
      hosts := String.Map.update !hosts hostname ~f:(function
          | None -> { jobs = String.Set.singleton job_name
-                   ; wait_for_data = copier hostname }
+                   ; wait_for_data = fun ~full -> copier ~full hostname }
          | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name }) in
    let remove_job ~job_name ~hostname =
      hosts := String.Map.update !hosts hostname ~f:(function
@@ -986,8 +987,8 @@ let main
          remove_job ~job_name ~hostname;
          Deferred.unit)
        f in
-   let wait_for_data ~hostname ~time =
-     (String.Map.find_exn !hosts hostname).wait_for_data time in
+   let wait_for_data ~full ~hostname ~time =
+     (String.Map.find_exn !hosts hostname).wait_for_data ~full time in
    (* This job is running the entire session *)
    let main_job = "main_job" in
    add_job ~job_name:main_job ~hostname:(Unix.gethostname ());
