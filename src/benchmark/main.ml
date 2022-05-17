@@ -205,7 +205,6 @@ let run_processor
     ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name =
   let deadline = Time_ns.add (Time_ns.now ()) job_time in
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
-  let did_something = ref false in
   (Cmd_worker.spawn_in_foreground
      ~how:(remote_how invocation)
      ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
@@ -234,7 +233,7 @@ let run_processor
            ~f:Cmd_worker.functions.continue
            ~arg:res >>|? fun () -> match res with
          | Skip -> None
-         | Bench _ -> did_something := true; Some lemma in
+         | Bench _ -> Some lemma in
        Cmd_worker.Connection.run conn
          ~f:Cmd_worker.functions.process
          ~arg:exec_info >>=? fun r ->
@@ -270,11 +269,6 @@ let run_processor
        relinquish ();
        loop () in
    loop () >>=? fun () ->
-   (if not !did_something then
-     Deferred.Or_error.fail (Error.of_string "A job did not have time to perform any task. \
-                                              Please increase the job time limit.")
-   else
-     Deferred.Or_error.return ()) >>=? fun () ->
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
    Process.wait process >>= function
