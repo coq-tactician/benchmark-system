@@ -922,7 +922,7 @@ let main
    let last_abstract_time = Counter.make 1 in
    let data_host = ref @@ Unix.gethostname () in
    let hosts = ref String.Map.empty in
-   let copier ~full target =
+   let copier target =
      let reqs = Mvar.create () in
      let update = Bvar.create () in
      let rec wait_for_time t =
@@ -934,7 +934,7 @@ let main
          if tcurr >= t then Deferred.unit else wait_for_time t in
      let host_abstract_time = ref 0 in
      let rec loop () =
-       Mvar.take reqs >>= fun t ->
+       Mvar.take reqs >>= fun (full, t) ->
        let synced_time = Counter.count last_abstract_time in
        (if not full && !host_abstract_time >= t then Deferred.unit else
         (if not @@ String.equal target !data_host then begin
@@ -966,15 +966,15 @@ let main
      in
      (* TODO: This is most likely a memory leak, because the loop never stops *)
      don't_wait_for (loop ());
-     fun time ->
+     fun ~full time ->
        Mvar.update reqs ~f:(function
-           | None -> time
-           | Some time' -> Int.max time time');
+           | None -> full, time
+           | Some (full', time') -> full || full', Int.max time time');
        wait_for_time time in
    let add_job ~job_name ~hostname =
      hosts := String.Map.update !hosts hostname ~f:(function
          | None -> { jobs = String.Set.singleton job_name
-                   ; wait_for_data = fun ~full -> copier ~full hostname }
+                   ; wait_for_data = copier hostname }
          | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name }) in
    let remove_job ~job_name ~hostname =
      hosts := String.Map.update !hosts hostname ~f:(function
