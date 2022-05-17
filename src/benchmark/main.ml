@@ -200,7 +200,7 @@ let remote_how invocation =
 
 let run_processor
     ~invocation
-    ~error_writer ~error_occurred:_
+    ~error_writer ~error_occurred
     ~task_allocator
     ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name =
   let deadline = Time_ns.add (Time_ns.now ()) job_time in
@@ -212,7 +212,7 @@ let run_processor
      { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
-   (* don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn); *)
+   don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn);
    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
    let pipes =
      [ Reader.transfer (Process.stdout process) processor_out
