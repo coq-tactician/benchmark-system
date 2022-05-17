@@ -200,7 +200,7 @@ let remote_how invocation =
 
 let run_processor
     ~invocation
-    ~error_writer ~error_occurred
+    ~error_writer ~error_occurred:_
     ~task_allocator
     ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name =
   let deadline = Time_ns.add (Time_ns.now ()) job_time in
@@ -212,7 +212,7 @@ let run_processor
      { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
-   don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn);
+   (* don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn); *)
    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
    let pipes =
      [ Reader.transfer (Process.stdout process) processor_out
@@ -387,9 +387,12 @@ let compile_and_retrieve_benchmark_info
   Ivar.fill stop_clock ();
   match line with
   | `Aborted ->
+    print_endline ("Sending sigint to compile " ^ Async_unix.Sexp.to_string_hum @@ Process.sexp_of_t p);
     Signal.send_i Signal.int (`Group (Process.pid p));
     Process.wait p >>| fun _ -> Or_error.errorf "Aborted before initial compilation could start"
-  | `Allocated `Eof -> Deferred.Or_error.fail @@ Error.createf "Compile alloc protocol error: Unexpected eof"
+  | `Allocated `Eof ->
+    Signal.send_i Signal.int (`Group (Process.pid p));
+    Process.wait p >>| fun _ -> Or_error.errorf "Compile alloc protocol error: Unexpected eof"
   | `Allocated `Ok invocation ->
     let invocation = Arg_parser.split invocation in
     Build_worker.spawn_in_foreground
@@ -628,6 +631,7 @@ let alloc_benchers =
      | `Aborted ->
        relinquish_alloc_token ();
        relinquish_running_token ();
+       print_endline ("Sending sigint to alloc " ^ Async_unix.Sexp.to_string_hum @@ Process.sexp_of_t p);
        Signal.send_i Signal.int (`Group (Process.pid p));
        Process.wait p >>| fun _ -> Or_error.return ()
      | `Allocated `Eof ->
