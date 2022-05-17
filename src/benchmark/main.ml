@@ -620,40 +620,41 @@ let alloc_benchers =
        () >>=? fun p ->
      let pipe = Reader.transfer (Process.stderr p) stderr in
      let stdout = Process.stdout p in
-     (Deferred.choose [ Deferred.choice (Reader.read_line stdout) (fun t -> `Allocated t)
-                      ; Deferred.choice abort (fun () -> `Aborted) ] >>= function
-      | `Aborted ->
-        relinquish_alloc_token ();
-        Signal.send_i Signal.int (`Group (Process.pid p)); Deferred.Or_error.ok_unit
-      | `Allocated `Eof ->
-        relinquish_alloc_token ();
-        Signal.send_i Signal.int (`Group (Process.pid p));
-        error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
-      | `Allocated `Ok time ->
-        (match int_of_string_opt time with
-         | None -> Deferred.Or_error.errorf "Alloc protocol error: Int expected, got %s" time
-         | Some time -> Deferred.Or_error.return time) >>=? fun time ->
-        let rec loop cont =
-          Reader.read_line stdout >>= function
-          | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
-          | `Ok invocation ->
-            if String.equal "done" invocation then
-              cont
-            else
-              let invocation = Arg_parser.split invocation in
-              let job = job_starter
-                  ~task_allocator
-                  ~job_time:(Time_ns.Span.of_sec (float_of_int time))
-                  ~invocation ~job_name:("job" ^ string_of_int (mk_id ())) >>| fun () -> Or_error.return () in
-              loop (cont >>=? fun () -> job) in
-        let cont = loop Deferred.Or_error.ok_unit in
-        relinquish_alloc_token ();
-        cont >>=? fun () ->
-        let stdin = Process.stdin p in
-        Monitor.detach (Writer.monitor stdin);
-        Writer.write stdin "done\n";
-        Deferred.Or_error.ok_unit
-     ) >>=? fun () ->
+     Deferred.choose [ Deferred.choice (Reader.read_line stdout) (fun t -> `Allocated t)
+                     ; Deferred.choice abort (fun () -> `Aborted) ] >>= function
+     | `Aborted ->
+       relinquish_alloc_token ();
+       relinquish_running_token ();
+       Signal.send_i Signal.int (`Group (Process.pid p));
+       Process.wait p >>| fun _ -> Or_error.return ()
+     | `Allocated `Eof ->
+       relinquish_alloc_token ();
+       relinquish_running_token ();
+       Signal.send_i Signal.int (`Group (Process.pid p));
+       error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
+     | `Allocated `Ok time ->
+       (match int_of_string_opt time with
+        | None -> Deferred.Or_error.errorf "Alloc protocol error: Int expected, got %s" time
+        | Some time -> Deferred.Or_error.return time) >>=? fun time ->
+       let rec loop cont =
+         Reader.read_line stdout >>= function
+         | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
+         | `Ok invocation ->
+           if String.equal "done" invocation then
+             cont
+           else
+             let invocation = Arg_parser.split invocation in
+             let job = job_starter
+                 ~task_allocator
+                 ~job_time:(Time_ns.Span.of_sec (float_of_int time))
+                 ~invocation ~job_name:("job" ^ string_of_int (mk_id ())) >>| fun () -> Or_error.return () in
+             loop (cont >>=? fun () -> job) in
+       let cont = loop Deferred.Or_error.ok_unit in
+       relinquish_alloc_token ();
+       cont >>=? fun () ->
+       let stdin = Process.stdin p in
+       Monitor.detach (Writer.monitor stdin);
+       Writer.write stdin "done\n";
        pipe >>= fun () ->
        Process.wait p >>= function
        | Ok () ->
