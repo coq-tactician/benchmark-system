@@ -376,18 +376,21 @@ let compile_and_retrieve_benchmark_info
     ~prog:"setsid"
     ~args:["-w"; compile_allocator; benchmark_commit]
     () >>=? fun p ->
-  Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Group (Process.pid p)));
   let pipe = Reader.transfer (Process.stderr p) stderr in
   let pstdout = Process.stdout p in
   let stop_clock = Ivar.create () in
   Clock_ns.every ~start:(Clock_ns.after Time_ns.Span.second)
     ~stop:(Ivar.read stop_clock) Time_ns.Span.minute (fun () ->
       Print.printf "\nWaiting for initial compilation resources\n");
-  Reader.read_line pstdout >>= fun line ->
+  Deferred.choose [ Deferred.choice (Reader.read_line pstdout) (fun t -> `Allocated t)
+                  ; Deferred.choice error_occurred (fun () -> `Aborted) ] >>= fun line ->
   Ivar.fill stop_clock ();
   match line with
-  | `Eof -> Deferred.Or_error.fail @@ Error.createf "Compile alloc protocol error: Unexpected eof"
-  | `Ok invocation ->
+  | `Aborted ->
+    Signal.send_i Signal.int (`Group (Process.pid p));
+    Process.wait p >>| fun _ -> Or_error.errorf "Aborted before initial compilation could start"
+  | `Allocated `Eof -> Deferred.Or_error.fail @@ Error.createf "Compile alloc protocol error: Unexpected eof"
+  | `Allocated `Ok invocation ->
     let invocation = Arg_parser.split invocation in
     Build_worker.spawn_in_foreground
       ~how:(remote_how invocation)
