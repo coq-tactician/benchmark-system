@@ -402,7 +402,7 @@ let compile_and_retrieve_benchmark_info
       ()
       ~connection_state_init_arg:()
     >>=? fun (conn, process) ->
-    don't_wait_for (error_occurred >>= fun () -> Build_worker.Connection.close conn);
+    (* don't_wait_for (error_occurred >>= fun () -> Build_worker.Connection.close conn); *)
     let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
     let pout1, pout2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stdout process) in
     let pipes =
