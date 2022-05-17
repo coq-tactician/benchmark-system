@@ -624,12 +624,13 @@ let alloc_benchers =
        ~prog:"setsid"
        ~args:["-w"; bench_allocator; benchmark_commit]
        () >>=? fun p ->
-     Deferred.upon abort (fun () -> Signal.send_i Signal.int (`Group (Process.pid p)));
      let pipe = Reader.transfer (Process.stderr p) stderr in
      let stdout = Process.stdout p in
-     Reader.read_line stdout >>= function
-     | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
-     | `Ok time ->
+     Deferred.choose [ Deferred.choice (Reader.read_line stdout) (fun t -> `Allocated t)
+                     ; Deferred.choice abort (fun () -> `Aborted) ] >>= function
+     | `Aborted -> Signal.send_i Signal.int (`Group (Process.pid p)); Deferred.Or_error.ok_unit
+     | `Allocated `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
+     | `Allocated `Ok time ->
        (match int_of_string_opt time with
         | None -> Deferred.Or_error.errorf "Alloc protocol error: Int expected, got %s" time
         | Some time -> Deferred.Or_error.return time) >>=? fun time ->
