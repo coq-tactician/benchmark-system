@@ -940,7 +940,8 @@ let main
              ; "opam-root/bench/.opam-switch/build/dose3.*"
              ; "opam-root/download-cache"
              ; "opam-root/repo"
-             ; "*.vo.bench"] in
+             ; "*.vo.bench"
+             ; "*.glob"] in
            let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
            let args = [ target; "rsync"; "-qa" ] @ exclude @ [ !data_host^":"^scratch^"/"; scratch^"/" ] in
            Process.run
