@@ -212,7 +212,9 @@ let run_processor
      { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
-   don't_wait_for (error_occurred >>= fun () -> print_endline "jaja closing"; Cmd_worker.Connection.close conn);
+   don't_wait_for (error_occurred >>= fun () -> print_endline "jaja closing";
+                   Cmd_worker.Connection.close conn >>= fun () -> print_endline "jaja closing done";
+                   Clock.after (Time.Span.of_sec 10.) >>| fun () -> print_endline  "waiting done");
    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
    let pipes =
      [ Reader.transfer (Process.stdout process) processor_out
