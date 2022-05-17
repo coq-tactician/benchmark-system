@@ -936,7 +936,7 @@ let main
      let rec loop () =
        Mvar.take reqs >>= fun t ->
        let synced_time = Counter.count last_abstract_time in
-       (if !host_abstract_time >= t then Deferred.unit else
+       (if not full && !host_abstract_time >= t then Deferred.unit else
         (if not @@ String.equal target !data_host then begin
            print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target ^ " at time " ^ string_of_int t ^ "/" ^ string_of_int (Counter.count last_abstract_time));
            let exclude =
