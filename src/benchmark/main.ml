@@ -212,7 +212,7 @@ let run_processor
      { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
-   don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn);
+   don't_wait_for (error_occurred >>= fun () -> print_endline "jaja closing"; Cmd_worker.Connection.close conn);
    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
    let pipes =
      [ Reader.transfer (Process.stdout process) processor_out
@@ -285,7 +285,7 @@ let run_processor
      Deferred.Or_error.fail (Error.of_string err))
   >>= function
   | Ok () -> Deferred.unit
-  | Error e -> Pipe.write error_writer e
+  | Error _e -> (* Pipe.write error_writer e *) print_endline "jaja error"; Deferred.unit
 
 module Build_worker = struct
   module T = struct
