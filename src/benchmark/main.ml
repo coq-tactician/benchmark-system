@@ -285,7 +285,7 @@ let run_processor
        Pipe.write error_writer (Error.of_string err)) >>| fun () -> res)
   >>= function
   | Ok () -> Deferred.unit
-  | Error e -> if Deferred.is_determined error_occurred then Pipe.write error_writer e else Deferred.unit
+  | Error e -> if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
 
 module Build_worker = struct
   module T = struct
