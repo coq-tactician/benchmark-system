@@ -223,7 +223,7 @@ let run_processor
    Cmd_worker.Connection.run conn
      ~f:Cmd_worker.functions.hostname
      ~arg:() >>=? fun hostname ->
-   let rec loop () =
+   (let rec loop () =
      task_allocator ~job_name ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
@@ -271,7 +271,7 @@ let run_processor
        relinquish ();
        loop () in
    loop () >>=? fun () ->
-   Cmd_worker.Connection.close conn >>= fun () ->
+   Cmd_worker.Connection.close conn >>| fun () -> Or_error.return ()) >>= fun _res ->
    Deferred.all_unit pipes >>= fun () ->
    Process.wait process >>= function
    | Ok () -> Deferred.Or_error.ok_unit
