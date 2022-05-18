@@ -916,7 +916,7 @@ let main
 
    let last_abstract_time = Counter.make 1 in
    let data_host = ref @@ Unix.gethostname () in
-   let data_host_rsyncs_active = ref String.Map.empty in
+   let data_host_rsyncs_active = ref @@ String.Map.singleton !data_host Deferred.unit in
    let hosts = ref String.Map.empty in
    let copier target =
      let reqs = Mvar.create () in
