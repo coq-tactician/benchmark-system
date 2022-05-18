@@ -369,7 +369,7 @@ let compile_and_retrieve_benchmark_info
     ~benchmark_commit
     ~packages
     ~injections_extra
-    ~add_job ~remove_job ~data_host ~wait_for_data ~last_abstract_time =
+    ~add_job ~remove_job ~switch_data_host ~final_data_host =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
   Process.create
@@ -414,10 +414,8 @@ let compile_and_retrieve_benchmark_info
       ~arg:() >>=? fun hostname ->
     let job_name = "compile_job" in
     add_job ~job_name ~hostname;
-    let final_data_host = !data_host in
     (* Make sure the initial data is copied over in case the build directory is being reused *)
-    wait_for_data ~full:true ~hostname ~time:1 >>= fun () ->
-    data_host := hostname;
+    switch_data_host hostname >>= fun () ->
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
       ~arg:{ root_dir; benchmark_target; benchmark_url = benchmark_repo^"#"^benchmark_commit; packages; injections_extra } >>|? fun r ->
@@ -427,8 +425,7 @@ let compile_and_retrieve_benchmark_info
     r1,
     Pipe.read_all r2 >>= fun timings ->
     let finish =
-      wait_for_data ~full:true ~hostname:final_data_host ~time:(Counter.count last_abstract_time) >>= fun () ->
-      data_host := final_data_host;
+      switch_data_host final_data_host >>= fun () ->
       remove_job ~job_name ~hostname;
       Build_worker.Connection.close conn >>= fun () ->
       Deferred.all_unit pipes >>= fun () ->
@@ -919,6 +916,7 @@ let main
 
    let last_abstract_time = Counter.make 1 in
    let data_host = ref @@ Unix.gethostname () in
+   let data_host_rsyncs_active = ref String.Map.empty in
    let hosts = ref String.Map.empty in
    let copier target =
      let reqs = Mvar.create () in
@@ -935,31 +933,37 @@ let main
        Mvar.take reqs >>= fun (full, t) ->
        let synced_time = Counter.count last_abstract_time in
        (if not full && !host_abstract_time >= t then Deferred.unit else
-        (if not @@ String.equal target !data_host then begin
-           print_endline ("rsyncing from data host " ^ !data_host ^ " to " ^ target ^ " at time " ^ string_of_int t ^ "/" ^ string_of_int (Counter.count last_abstract_time));
-           let exclude =
-             if full then [ "*.vo.bench" ] else
-               [ "opam-root/bench/.opam-switch/sources"
-               ; "opam-root/bench/.opam-switch/build/coq.*"
-               ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
-               ; "opam-root/bench/.opam-switch/build/dune.*"
-               ; "opam-root/bench/.opam-switch/build/dose3.*"
-               ; "opam-root/download-cache"
-               ; "opam-root/repo"
-               ; "*.vo.bench"
-               ; "*.glob"
-               ; "*.aux"] in
-           let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
-           let args = [ target; "rsync"; "-qa" ] @ exclude @ [ !data_host^":"^scratch^"/"; scratch^"/" ] in
-           Process.run
-             ~prog:"ssh"
-             ~args () >>= function
-           | Error e ->
-             Pipe.write error_writer e
-           | Ok _out ->
-             Deferred.unit end
-         else Deferred.unit) >>| fun () ->
-        host_abstract_time := synced_time) >>= fun () ->
+          let data_host = !data_host in
+          (if not @@ String.equal target data_host then begin
+              print_endline ("rsyncing from data host " ^ data_host ^ " to " ^ target ^ " at time " ^ string_of_int t ^ "/" ^ string_of_int (Counter.count last_abstract_time));
+              let exclude =
+                if full then [ "*.vo.bench" ] else
+                  [ "opam-root/bench/.opam-switch/sources"
+                  ; "opam-root/bench/.opam-switch/build/coq.*"
+                  ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
+                  ; "opam-root/bench/.opam-switch/build/dune.*"
+                  ; "opam-root/bench/.opam-switch/build/dose3.*"
+                  ; "opam-root/download-cache"
+                  ; "opam-root/repo"
+                  ; "*.vo.bench"
+                  ; "*.glob"
+                  ; "*.aux"] in
+              let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
+              let args = [ target; "rsync"; "-qa" ] @ exclude @ [ data_host^":"^scratch^"/"; scratch^"/" ] in
+              let prsync = Process.run
+                ~prog:"ssh"
+                ~args () in
+              data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
+                  | None -> assert false
+                  | Some m -> prsync >>= fun _ -> m);
+              prsync >>= function
+              | Error e ->
+                Pipe.write error_writer e
+              | Ok _out ->
+                Deferred.unit
+            end
+           else Deferred.unit) >>| fun () ->
+          host_abstract_time := synced_time) >>= fun () ->
        Bvar.broadcast update !host_abstract_time;
        loop ()
      in
@@ -988,6 +992,13 @@ let main
        f in
    let wait_for_data ~full ~hostname ~time =
      (String.Map.find_exn !hosts hostname).wait_for_data ~full time in
+   let switch_data_host new_host =
+     let old_host = !data_host in
+     wait_for_data ~full:true ~hostname:new_host ~time:(Counter.count last_abstract_time) >>= fun () ->
+     data_host_rsyncs_active := String.Map.set !data_host_rsyncs_active ~key:new_host ~data:Deferred.unit;
+     data_host := new_host;
+     String.Map.find_exn !data_host_rsyncs_active old_host in
+
    (* This job is running the entire session *)
    let main_job = "main_job" in
    add_job ~job_name:main_job ~hostname:(Unix.gethostname ());
@@ -1002,7 +1013,7 @@ let main
      ~benchmark_commit
      ~packages
      ~injections_extra
-     ~add_job ~remove_job ~data_host ~wait_for_data ~last_abstract_time
+     ~add_job ~remove_job ~switch_data_host ~final_data_host:!data_host
    >>= function
    | Error e ->
      Pipe.write error_writer e
