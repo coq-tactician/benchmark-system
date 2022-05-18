@@ -212,18 +212,16 @@ let run_processor
      { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
-   don't_wait_for (error_occurred >>= fun () -> print_endline "jaja closing";
-                   Cmd_worker.Connection.close conn >>= fun () -> print_endline "jaja closing done";
-                   Clock.after (Time.Span.of_sec 10.) >>| fun () -> print_endline  "waiting done");
    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
    let pipes =
      [ Reader.transfer (Process.stdout process) processor_out
      ; Pipe.transfer_id perr1 processor_err
      ; Pipe.transfer_id perr2 stderr ] in
-   Cmd_worker.Connection.run conn
+   don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn);
+   (Cmd_worker.Connection.run conn
      ~f:Cmd_worker.functions.hostname
      ~arg:() >>=? fun hostname ->
-   (let rec loop () =
+   let rec loop () =
      task_allocator ~job_name ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
@@ -270,24 +268,24 @@ let run_processor
        >>=? fun _processed_lemmas ->
        relinquish ();
        loop () in
-   loop () >>=? fun () ->
-   Cmd_worker.Connection.close conn >>| fun () -> Or_error.return ()) >>= fun _res ->
+   loop ()) >>= fun res ->
+   Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
-   Process.wait process >>= function
-   | Ok () -> Deferred.Or_error.ok_unit
-   | Error (`Exit_non_zero i) ->
-     let err = "Abnormal exit code for command worker: " ^ job_name ^ " on host " ^
-               hostname ^ ". Code: " ^ string_of_int i in
-     Pipe.write processor_err err >>= fun () ->
-     Deferred.Or_error.fail (Error.of_string err)
-   | Error (`Signal s) ->
-     let err = "Abnormal exit signal for command worker: " ^ job_name ^ " on host " ^
-               hostname ^ ". Signal: " ^ Signal.to_string s in
-     Pipe.write processor_err err >>= fun () ->
-     Deferred.Or_error.fail (Error.of_string err))
+   (Process.wait process >>= function
+     | Ok () -> Deferred.unit
+     | Error (`Exit_non_zero i) ->
+       let err = "Abnormal exit code for command worker: " ^ job_name ^ " with invocation " ^
+                 String.concat ~sep:" " invocation ^ ". Code: " ^ string_of_int i in
+       Pipe.write processor_err err >>= fun () ->
+       Pipe.write error_writer (Error.of_string err)
+     | Error (`Signal s) ->
+       let err = "Abnormal exit signal for command worker: " ^ job_name ^ " on host " ^
+                 String.concat ~sep:" " invocation ^ ". Signal: " ^ Signal.to_string s in
+       Pipe.write processor_err err >>= fun () ->
+       Pipe.write error_writer (Error.of_string err)) >>| fun () -> res)
   >>= function
   | Ok () -> Deferred.unit
-  | Error _e -> (* Pipe.write error_writer e *) print_endline "jaja error"; Deferred.unit
+  | Error e -> Pipe.write error_writer e
 
 module Build_worker = struct
   module T = struct
