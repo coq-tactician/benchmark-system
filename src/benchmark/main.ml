@@ -926,8 +926,8 @@ let main
      let rec wait_for_time t =
        Deferred.choose
          [ Deferred.choice (Bvar.wait update) (fun t -> `Time t)
-         (* ; Deferred.choice error_occurred (fun () -> `Error) *) ] >>= function
-       (* | `Error -> Deferred.unit *)
+         ; Deferred.choice error_occurred (fun () -> `Error) ] >>= function
+       | `Error -> Deferred.unit
        | `Time tcurr ->
          if tcurr >= t then Deferred.unit else wait_for_time t in
      let host_abstract_time = ref 0 in
