@@ -955,10 +955,8 @@ let main
                   | None -> assert false
                   | Some m -> prsync >>= fun _ -> m);
               prsync >>= function
-              | Error e ->
-                Pipe.write error_writer e
-              | Ok _out ->
-                Deferred.unit
+              | Error e -> if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
+              | Ok _out -> Deferred.unit
             end
            else Deferred.unit) >>| fun () ->
           host_abstract_time := synced_time) >>= fun () ->
