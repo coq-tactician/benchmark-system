@@ -922,12 +922,8 @@ let main
      let reqs = Mvar.create () in
      let update = Bvar.create () in
      let rec wait_for_time t =
-       Deferred.choose
-         [ Deferred.choice (Bvar.wait update) (fun t -> `Time t)
-         ; Deferred.choice error_occurred (fun () -> `Error) ] >>= function
-       | `Error -> Deferred.unit
-       | `Time tcurr ->
-         if tcurr >= t then Deferred.unit else wait_for_time t in
+       Bvar.wait update >>= fun tcurr ->
+       if tcurr >= t then Deferred.unit else wait_for_time t in
      let host_abstract_time = ref 0 in
      let rec loop () =
        Mvar.take reqs >>= fun (full, t) ->
@@ -950,9 +946,11 @@ let main
                   ; "*.aux"] in
               let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
               let args = [ target; "rsync"; "-qa" ] @ exclude @ [ data_host^":"^scratch^"/"; scratch^"/" ] in
-              let prsync = Process.run
+              let prsync = Process.create
                 ~prog:"ssh"
-                ~args () in
+                ~args () >>=? fun p ->
+                Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
+                Process.collect_stdout_and_wait p in
               data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
                   | None -> assert false
                   | Some m -> prsync >>= fun _ -> m);
