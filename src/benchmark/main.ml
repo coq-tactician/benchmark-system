@@ -875,7 +875,7 @@ let task_disseminator
         let bench_alloc =
           alloc_benchers
             ~task_allocator
-            ~abort:(Deferred.any [(* error_occurred; *) ResourceManager.finished lemma_token_queue])
+            ~abort:(Deferred.any [error_occurred; ResourceManager.finished lemma_token_queue])
             ~relinquish_alloc_token:(fun () -> ra `Requested)
             ~relinquish_running_token:(fun () -> rr `Total) in
         loop (cont >>= fun () -> bench_alloc)
