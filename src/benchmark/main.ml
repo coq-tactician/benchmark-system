@@ -387,7 +387,6 @@ let compile_and_retrieve_benchmark_info
   Ivar.fill stop_clock ();
   match line with
   | `Aborted ->
-    print_endline ("Sending sigint to compile " ^ Async_unix.Sexp.to_string_hum @@ Process.sexp_of_t p);
     Signal.send_i Signal.int (`Group (Process.pid p));
     Process.wait p >>| fun _ -> Or_error.errorf "Aborted before initial compilation could start"
   | `Allocated `Eof ->
@@ -631,7 +630,6 @@ let alloc_benchers =
      | `Aborted ->
        relinquish_alloc_token ();
        relinquish_running_token ();
-       print_endline ("Sending sigint to alloc " ^ Async_unix.Sexp.to_string_hum @@ Process.sexp_of_t p);
        Signal.send_i Signal.int (`Group (Process.pid p));
        Process.wait p >>| fun _ -> Or_error.return ()
      | `Allocated `Eof ->
