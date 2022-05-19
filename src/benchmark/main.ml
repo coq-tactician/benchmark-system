@@ -649,7 +649,7 @@ let alloc_benchers =
              let invocation = Arg_parser.split invocation in
              let job = job_starter
                  ~task_allocator
-                 ~job_time:(Time_ns.Span.of_sec (float_of_int time))
+                 ~job_time:(Time_ns.Span.of_min (float_of_int time))
                  ~invocation ~job_name:("job" ^ string_of_int (mk_id ())) >>| fun () -> Or_error.return () in
              loop (cont >>=? fun () -> job) in
        let cont = loop Deferred.Or_error.ok_unit in
