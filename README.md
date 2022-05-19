@@ -23,8 +23,8 @@ For details, please read the output of `tactician-benchmark -help`. This ouput i
 
 ## Examples:
 - Running a benchmark of coq-tactician-stdlib on a single computer with a time limit of 40 seconds.
-  A maximum of 16 cores are used for benchmarking (as ensured by '-maxrequests 16' and '-max-running 16').
-  Additionally, the flag '-delay-benchmark' ensures that benchmarking only starts after the initial
+  A maximum of 16 cores are used for benchmarking (as ensured by `-maxrequests 16` and `-max-running 16`).
+  Additionally, the flag `-delay-benchmark` ensures that benchmarking only starts after the initial
   compilation of Opam packages has finished. This ensures hat the CPU cycles taken by the initial
   compilation does not interfere with the benchmarking.
   ```
