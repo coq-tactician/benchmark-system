@@ -1143,7 +1143,7 @@ let command =
      and+ max_running = flag "max-running" (optional int)
          ~doc:"int The maximum number of resource requests that can be requested and running at the same time. \
                Infinite by default."
-     and+ debug = flag "debug" (optional_with_default false bool)
+     and+ debug = flag "debug" no_arg
          ~doc:"bool Show additional debug info on stderr."
      and+ benchmark_data = anon ("benchmark-data" %: string)
      and+ benchmark_target = anon ("benchmark-target" %: string)
