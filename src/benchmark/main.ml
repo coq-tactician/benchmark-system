@@ -222,10 +222,9 @@ let run_processor
      ~f:Cmd_worker.functions.hostname
      ~arg:() >>=? fun hostname ->
    let rec loop () =
-     task_allocator ~job_name ~hostname deadline >>= function
+     task_allocator ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
-       print_endline ("Processor " ^ job_name ^ " on host " ^ hostname ^ " received task");
        let continue lemma =
          let ivar = Ivar.create () in
          Pipe.write lemma_disseminator (deadline, lemma, ivar) >>= fun () ->
@@ -833,14 +832,13 @@ let task_disseminator
                    ; lemma_count
                    ; abstract_time = Counter.count last_abstract_time } :: !data) >>| fun () ->
     ResourceManager.finish lemma_token_queue in
-  let task_allocator ~job_name ~hostname deadline =
+  let task_allocator ~hostname deadline =
     let rec loop () =
       Deferred.choose
         [ Deferred.Choice.map (ResourceManager.allocate lemma_token_queue) ~f:(fun x -> `Available x)
         ; Deferred.choice (Clock_ns.at (Time_ns.sub deadline lemma_time')) (fun () -> `Out_of_time)
         ; Deferred.choice error_occurred (fun () -> `Error) ] >>= function
       | `Out_of_time | `Available `Eof | `Error ->
-        print_endline ("allocator loop of job " ^ job_name ^ " on host " ^ hostname ^ " stopping");
         Deferred.return `Stop
       | `Available `Race ->
         Pipe.write stderr "Race condition during task dissemination. Trying again.\n" >>= fun () ->
@@ -854,13 +852,10 @@ let task_disseminator
             lemma_count () > 0 && time_remaining deadline) in
         match task with
         | None ->
-          print_endline ("allocator loop of job " ^ job_name ^ " on host " ^ hostname ^ " stopping");
           Deferred.return `Stop
         | Some { exec_info; executors; lemma_disseminator; abstract_time; _ } ->
           Counter.increase executors;
-          print_endline ("pre wait_for_data for " ^ job_name ^ " on host " ^ hostname);
           wait_for_data ~full:false ~hostname ~time:abstract_time >>| fun () ->
-          print_endline ("post wait_for_data for " ^ job_name ^ " on host " ^ hostname);
           `Task ((fun () -> Counter.decrease executors), exec_info, lemma_disseminator) in
     loop () in
   let allocator =
@@ -1004,16 +999,12 @@ let main
          | None -> { jobs = String.Set.singleton job_name
                    ; wait_for_data = copier hostname }
          | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name });
-     let { jobs; _ } = String.Map.find_exn !hosts hostname in
-     print_endline ("Added job " ^ job_name ^ " to " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs))
    in
    let remove_job ~job_name ~hostname =
      let { jobs; wait_for_data } = String.Map.find_exn !hosts hostname in
      let jobs = String.Set.remove jobs job_name in
      hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
-     print_endline ("Removed job " ^ job_name ^ " from " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs));
-     if String.Set.is_empty jobs then
-       (print_endline ("waiting for data deletion on " ^ hostname); wait_for_data None) else Deferred.unit in
+     if String.Set.is_empty jobs then wait_for_data None else Deferred.unit in
    let with_job ~job_name ~hostname f =
      add_job ~job_name ~hostname;
      Monitor.protect ~finally:(fun () ->
