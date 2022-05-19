@@ -148,6 +148,18 @@ tactician-benchmark PACKAGE [PACKAGE ...]
   [-delay-benchmark]             Delay the benchmark until the initial build is
                                  fully complete. Useful when the build process
                                  may interfere with the benchmark timings.
+  [-exclude file]                A file containing a line-separated list of
+                                 lemma names that should not benchmarked. Thos
+                                 lemmas are ignored.
+  [-exclude-regexp regexp]       A regular expression matching lemmas. Only
+                                 lemmas not matching the expression are
+                                 benchmarked.
+  [-include file]                A file containing a line-separated list of
+                                 lemma names that should be benchmarked. Other
+                                 lemmas
+                                 are ignored.
+  [-include-regexp refexp]       A regular expression matching lemmas. Only
+                                 lemmas matching the expression are benchmarked.
   [-inject vernacular] ...       Inject Coq vernacular into the compilation and
                                  benchmarking process. Typically used to specify
                                  options. Can be repeated multiple times and
@@ -172,5 +184,4 @@ tactician-benchmark PACKAGE [PACKAGE ...]
   [-version]                     print the version of this build and exit
   [-help]                        print this help text and exit
                                  (alias: -?)
-
 ```

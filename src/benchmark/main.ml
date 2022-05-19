@@ -887,7 +887,31 @@ let task_disseminator
     loop Deferred.unit in
   Deferred.all_unit [task_receiver; allocator]
 
+let filter_lemmas lemma_filter info_stream =
+  let mk_lemma_set file =
+    Reader.file_lines file >>| fun lemmas ->
+    let lemmas = List.map lemmas ~f:String.strip in
+    String.Set.of_list lemmas in
+  (match lemma_filter with
+   | None -> Deferred.return (fun _ -> true)
+   | Some (`Include file) ->
+     mk_lemma_set file >>| fun lemmas ->
+     fun lemma -> String.Set.mem lemmas lemma
+   | Some (`Exclude file) ->
+     mk_lemma_set file >>| fun lemmas ->
+     fun lemma -> not @@ String.Set.mem lemmas lemma
+   | Some (`IncludeRegexp regexp) ->
+     let regexp = Str.regexp regexp in
+     return (fun lemma -> Str.string_match regexp lemma 0)
+   | Some (`ExcludeRegexp regexp) ->
+     let regexp = Str.regexp regexp in
+     return (fun lemma -> not @@ Str.string_match regexp lemma 0))
+  >>| fun filter ->
+  Pipe.map info_stream ~f:(fun ({lemmas; _ } as info : pre_bench_info) ->
+      { info with lemmas = List.filter lemmas ~f:filter })
+
 let main
+    ~lemma_filter
     ~injections_extra
     ~scratch
     ~delay_benchmark
@@ -1047,6 +1071,7 @@ let main
    | Ok (info_stream, cont) ->
      let info_stream = Pipe.map info_stream ~f:(fun ({ args; _ } as info) ->
          { info with args = Array.append args extra_args }) in
+     filter_lemmas lemma_filter info_stream >>= fun info_stream ->
      let info_stream, reporter_stream = Pipe.fork ~pushback_uses:`Fast_consumer_only info_stream in
      let resources_requested_queue = ResourceManager.make_resource `Requested max_requests in
      let resources_total_queue = ResourceManager.make_resource' `Total max_running in
@@ -1173,10 +1198,26 @@ Examples:
     ~summary:"Benchmark Tactician"
     (let tmp_dir = flag "tmp-dir" (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `Tmp x)))
          ~doc:"dir Location in which a temporary directory will be created to store the build. If not supplied, it is taken from $TMPDIR. \
-               After the benchmark is finished, the directory is cleaned up. Mutually exclusive with -build-dir." in
-     let build_dir = flag "build-dir" (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `Build x)))
-         ~doc:"dir Location of the build. This directory will not be cleaned up after the benchmark finishes. Mutually exclusive with -tmp-dir." in
+               After the benchmark is finished, the directory is cleaned up. Mutually exclusive with -build-dir."
+     and build_dir = flag "build-dir" (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `Build x)))
+         ~doc:"dir Location of the build. This directory will not be cleaned up after the benchmark finishes. \
+               Mutually exclusive with -tmp-dir."
+     and lemmas_include = flag "include" (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `Include x)))
+         ~doc:"file A file containing a line-separated list of lemma names that should be benchmarked. Other lemmas \ 
+              are ignored."
+     and lemmas_exclude = flag "exclude" (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `Exclude x)))
+         ~doc:"file A file containing a line-separated list of lemma names that should not benchmarked. Thos lemmas \
+               are ignored."
+     and lemmas_include_regexp = flag "include-regexp"
+         (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `IncludeRegexp x)))
+         ~doc:"refexp A regular expression matching lemmas. Only lemmas matching the expression are benchmarked."
+     and lemmas_exclude_regexp = flag "exclude-regexp"
+         (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `ExcludeRegexp x)))
+         ~doc:"regexp A regular expression matching lemmas. Only lemmas not matching the expression are benchmarked."
+     in
      let+ loc = choose_one [tmp_dir; build_dir] ~if_nothing_chosen:If_nothing_chosen.Return_none
+     and+ lemma_filter = choose_one [lemmas_include; lemmas_exclude; lemmas_include_regexp; lemmas_exclude_regexp]
+         ~if_nothing_chosen:If_nothing_chosen.Return_none
      and+ delay_benchmark = flag "delay-benchmark" no_arg
          ~doc:"Delay the benchmark until the initial build is fully complete. Useful when the build process may interfere with the benchmark timings."
      and+ injection_strings = flag "inject" (listed string)
@@ -1262,6 +1303,7 @@ Examples:
          List.iter ~f:print_endline packages;
          compile_injection_string ~injection_strings ~injection_files >>= fun injections_extra ->
          main
+           ~lemma_filter
            ~injections_extra
            ~scratch ~delay_benchmark
            ~bench_allocator ~compile_allocator ~max_requests ~max_running

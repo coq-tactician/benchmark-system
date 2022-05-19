@@ -1,7 +1,7 @@
 (executable
  (public_name tactician-benchmark)
  (name main)
- (libraries extunix core async rpc_parallel opam_build)
+ (libraries str extunix core async rpc_parallel opam_build)
  (modules main arg_parser spawn_with_socket)
  (preprocess (pps ppx_jane)))
 
