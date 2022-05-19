@@ -855,10 +855,13 @@ let task_disseminator
             lemma_count () > 0 && time_remaining deadline) in
         match task with
         | None ->
+          print_endline ("allocator loop of job " ^ job_name ^ " on host " ^ hostname ^ " stopping");
           Deferred.return `Stop
         | Some { exec_info; executors; lemma_disseminator; abstract_time; _ } ->
           Counter.increase executors;
+          print_endline ("pre wait_for_data for " ^ job_name ^ " on host " ^ hostname);
           wait_for_data ~full:false ~hostname ~time:abstract_time >>| fun () ->
+          print_endline ("post wait_for_data for " ^ job_name ^ " on host " ^ hostname);
           `Task ((fun () -> Counter.decrease executors), exec_info, lemma_disseminator) in
     loop () in
   let allocator =
