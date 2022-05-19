@@ -1126,6 +1126,48 @@ let command =
   Log.Global.set_level `Error;
   let open CommandLetSyntax in
   Command.async_or_error
+    ~readme:(fun () -> {|
+The distributed benchmarking system of Tactician.
+Input:
+  - The repository and commit hash of a particular version of Tactician (or one of it's model plugins).
+  - A set of Opam packages to benchmark on that particular commit.
+  - Parameters governing which lemmas to benchmark and how long.
+  - A way to allocate resources either locally, remotely through ssh, or through a HPC cluster.
+Output:
+  - Every requested lemma will be benchmarked, and the results will be uploaded to the 'benchmark-data'
+    repository of the coq-tactician Github organization.
+Details:
+  For details, please read the description of the flags below.
+Examples:
+  - Running a benchmark of coq-tactician-stdlib on a single computer with a time limit of 40 seconds.
+    A maximum of 16 cores are used for benchmarking (as ensured by '-maxrequests 16' and '-max-running 16').
+    Additionally, the flag '-delay-benchmark' ensures that benchmarking only starts after the initial
+    compilation of Opam packages has finished. This ensures hat the CPU cycles taken by the initial
+    compilation does not interfere with the benchmarking.
+    tactician-benchmark \
+        -benchmark-data ./benchmark-data/ \
+        -compile-allocator ./benchmark-system/local_compile_allocator \
+        -bench-allocator ./benchmark-system/local_bench_allocator \
+        -max-requests 16 \
+        -max-running 16 \
+        -delay-benchmark \
+        -benchmark-target coq-tactician \
+        -benchmark-repo git+ssh://git@github.com/coq-tactician/coq-tactician \
+        -benchmark-commit f267afe31ab82b071d3f03d08bc4a6595c30b1d2 \
+        -benchmark-time 40 \
+        coq-tactician-stdlib
+  - Running a benchmark of coq-tactician-stdlib on a SLURM cluster with a time limit of 40 seconds:
+    tactician-benchmark \
+        -benchmark-data ./benchmark-data/ \
+        -compile-allocator ./benchmark-system/slurm_compile_allocator \
+        -bench-allocator ./benchmark-system/slurm_bench_allocator \
+        -max-requests 28 \
+        -benchmark-target coq-tactician \
+        -benchmark-repo git+ssh://git@github.com/coq-tactician/coq-tactician \
+        -benchmark-commit f267afe31ab82b071d3f03d08bc4a6595c30b1d2 \
+        -benchmark-time 40 \
+        coq-tactician-stdlib
+|})
     ~summary:"Benchmark Tactician"
     (let tmp_dir = flag "tmp-dir" (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `Tmp x)))
          ~doc:"dir Location in which a temporary directory will be created to store the build. If not supplied, it is taken from $TMPDIR. \
