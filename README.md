@@ -41,7 +41,9 @@ For details, please read the output of `tactician-benchmark -help`. This ouput i
       -benchmark-time 40 \
       coq-tactician-stdlib
   ```
-- Running a benchmark of coq-tactician-stdlib on a SLURM cluster with a time limit of 40 seconds:
+- Running a benchmark of coq-tactician-stdlib on a SLURM cluster with a time limit of 40 seconds. A maximum of
+  28 resource requests are allowed to be submitted to the SLURM queue at the same time. There is no limit on
+  the number of simultaneous allocated resources.
   ```
   tactician-benchmark \
       -benchmark-data ./benchmark-data/ \
