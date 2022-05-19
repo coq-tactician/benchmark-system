@@ -202,7 +202,7 @@ let run_processor
     ~invocation
     ~error_writer ~error_occurred
     ~task_allocator
-    ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name =
+    ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name with_job =
   let deadline = Time_ns.add (Time_ns.now ()) job_time in
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   (Cmd_worker.spawn_in_foreground
@@ -269,7 +269,7 @@ let run_processor
        >>=? fun _processed_lemmas ->
        relinquish ();
        loop () in
-   loop ()) >>= fun res ->
+   with_job ~job_name ~hostname loop) >>= fun res ->
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
    (Process.wait process >>= function
@@ -792,7 +792,7 @@ type compile_unit_data =
 let task_disseminator
     ~alloc_benchers ~request_allocate
     ~error_occurred ~info_stream ~lemma_time
-    ~with_job ~wait_for_data
+    ~wait_for_data
     ~last_abstract_time =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let lemma_time' = Time_ns.Span.of_sec @@ float_of_int lemma_time in
@@ -834,7 +834,6 @@ let task_disseminator
                    ; abstract_time = Counter.count last_abstract_time } :: !data) >>| fun () ->
     ResourceManager.finish lemma_token_queue in
   let task_allocator ~job_name ~hostname deadline =
-    with_job ~job_name ~hostname @@ fun () ->
     let rec loop () =
       Deferred.choose
         [ Deferred.Choice.map (ResourceManager.allocate lemma_token_queue) ~f:(fun x -> `Available x)
@@ -1059,7 +1058,7 @@ let main
          ~error_writer ~error_occurred
          ~task_allocator
          ~reporter ~coq_out ~coq_err ~processor_out ~processor_err
-         ~job_time ~job_name >>| fun () ->
+         ~job_time ~job_name with_job >>| fun () ->
        Counter.decrease jobs_running in
      let alloc_benchers ~task_allocator ~abort =
        alloc_benchers
@@ -1073,7 +1072,7 @@ let main
        ~request_allocate
        ~error_occurred
        ~info_stream ~lemma_time
-       ~with_job ~wait_for_data
+       ~wait_for_data
        ~last_abstract_time >>= fun () ->
      cont >>= summarize)
   >>= fun () ->
