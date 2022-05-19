@@ -426,7 +426,7 @@ let compile_and_retrieve_benchmark_info
     Pipe.read_all r2 >>= fun timings ->
     let finish =
       switch_data_host final_data_host >>= fun () ->
-      remove_job ~job_name ~hostname;
+      remove_job ~job_name ~hostname >>= fun () ->
       Build_worker.Connection.close conn >>= fun () ->
       Deferred.all_unit pipes >>= fun () ->
       Process.wait process >>= (function
@@ -779,7 +779,7 @@ end
 
 type host_data =
   { jobs : String.Set.t
-  ; wait_for_data : full:bool -> int -> unit Deferred.t }
+  ; wait_for_data : (bool * int) option -> unit Deferred.t }
 
 type compile_unit_data =
   { exec_info          : exec_info
@@ -926,68 +926,85 @@ let main
        if tcurr >= t then Deferred.unit else wait_for_time t in
      let host_abstract_time = ref 0 in
      let rec loop () =
-       Mvar.take reqs >>= fun (full, t) ->
-       let synced_time = Counter.count last_abstract_time in
-       (if not full && !host_abstract_time >= t then Deferred.unit else
-          let data_host = !data_host in
-          (if not @@ String.equal target data_host then begin
-              print_endline ("rsyncing from data host " ^ data_host ^ " to " ^ target ^ " at time " ^ string_of_int t ^ "/" ^ string_of_int (Counter.count last_abstract_time));
-              let exclude =
-                if full then [ "*.vo.bench" ] else
-                  [ "opam-root/bench/.opam-switch/sources"
-                  ; "opam-root/bench/.opam-switch/build/coq.*"
-                  ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
-                  ; "opam-root/bench/.opam-switch/build/dune.*"
-                  ; "opam-root/bench/.opam-switch/build/dose3.*"
-                  ; "opam-root/download-cache"
-                  ; "opam-root/repo"
-                  ; "*.vo.bench"
-                  ; "*.glob"
-                  ; "*.aux"] in
-              let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
-              let args = [ target; "rsync"; "-qa" ] @ exclude @ [ data_host^":"^scratch^"/"; scratch^"/" ] in
-              let prsync = Process.create
-                ~prog:"ssh"
-                ~args () >>=? fun p ->
-                Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
-                Process.collect_stdout_and_wait p in
-              data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
-                  | None -> assert false
-                  | Some m -> prsync >>= fun _ -> m);
-              prsync >>= function
-              | Error e -> if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
-              | Ok _out -> Deferred.unit
-            end
-           else Deferred.unit) >>| fun () ->
-          host_abstract_time := synced_time) >>= fun () ->
+       (Mvar.take reqs >>= function
+         | None ->
+           (host_abstract_time := 0;
+            print_endline ("removing data from node " ^ target);
+            Process.run
+              ~prog:"ssh"
+              ~args:[target; "rm"; "-rf"; scratch] () >>= function
+            | Error e -> Pipe.write error_writer e
+            | Ok _out -> Deferred.unit)
+         | Some (full, t) ->
+           if not full && !host_abstract_time >= t then Deferred.unit else
+             let synced_time = Counter.count last_abstract_time in
+             let data_host = !data_host in
+             (if not @@ String.equal target data_host then begin
+                 print_endline ("rsyncing from data host " ^ data_host ^ " to " ^ target ^
+                                " at time " ^ string_of_int t ^ "/" ^
+                                string_of_int (Counter.count last_abstract_time));
+                 let exclude =
+                   if full then [ "*.vo.bench" ] else
+                     [ "opam-root/bench/.opam-switch/sources"
+                     ; "opam-root/bench/.opam-switch/build/coq.*"
+                     ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
+                     ; "opam-root/bench/.opam-switch/build/dune.*"
+                     ; "opam-root/bench/.opam-switch/build/dose3.*"
+                     ; "opam-root/download-cache"
+                     ; "opam-root/repo"
+                     ; "*.vo.bench"
+                     ; "*.glob"
+                     ; "*.aux"] in
+                 let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
+                 let args = [ target; "rsync"; "-qa" ] @ exclude @ [ data_host^":"^scratch^"/"; scratch^"/" ] in
+                 let prsync = Process.create
+                     ~prog:"ssh"
+                     ~args () >>=? fun p ->
+                   Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
+                   Process.collect_stdout_and_wait p in
+                 data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
+                     | None -> assert false
+                     | Some m -> prsync >>= fun _ -> m);
+                 prsync >>= function
+                 | Error e ->
+                   if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
+                 | Ok _out -> Deferred.unit
+               end
+              else Deferred.unit) >>| fun () ->
+             host_abstract_time := synced_time)
+       >>= fun () ->
        Bvar.broadcast update !host_abstract_time;
        loop ()
      in
      (* TODO: This is most likely a memory leak, because the loop never stops *)
      don't_wait_for (loop ());
-     fun ~full time ->
-       Mvar.update reqs ~f:(function
-           | None -> full, time
-           | Some (full', time') -> full || full', Int.max time time');
-       wait_for_time time in
+     fun time' ->
+       Mvar.update reqs ~f:(fun time ->
+           match time, time' with
+           | None, _ | Some None, _ -> time'
+           | Some (Some _), None -> assert false
+           | Some (Some (full, time)), Some (full', time') -> Some (full || full', Int.max time time'));
+       match time' with
+       | None ->
+         Bvar.wait update >>| fun _ -> ()
+       | Some (_, t) -> wait_for_time t in
    let add_job ~job_name ~hostname =
      hosts := String.Map.update !hosts hostname ~f:(function
          | None -> { jobs = String.Set.singleton job_name
                    ; wait_for_data = copier hostname }
          | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name }) in
    let remove_job ~job_name ~hostname =
-     hosts := String.Map.update !hosts hostname ~f:(function
-         | None -> assert false
-         | Some ({ jobs; _ } as data) ->
-           { data with jobs = String.Set.remove jobs job_name }) in
+     let { jobs; wait_for_data } = String.Map.find_exn !hosts hostname in
+     let jobs = String.Set.remove jobs job_name in
+     hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
+     if String.Set.is_empty jobs then wait_for_data None else Deferred.unit in
    let with_job ~job_name ~hostname f =
      add_job ~job_name ~hostname;
      Monitor.protect ~finally:(fun () ->
-         remove_job ~job_name ~hostname;
-         Deferred.unit)
+         remove_job ~job_name ~hostname)
        f in
    let wait_for_data ~full ~hostname ~time =
-     (String.Map.find_exn !hosts hostname).wait_for_data ~full time in
+     (String.Map.find_exn !hosts hostname).wait_for_data (Some (full, time)) in
    let switch_data_host new_host =
      let old_host = !data_host in
      wait_for_data ~full:true ~hostname:new_host ~time:(Counter.count last_abstract_time) >>= fun () ->
