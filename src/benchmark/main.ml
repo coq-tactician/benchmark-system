@@ -38,6 +38,12 @@ type exec_info =
   ; dir    : string }
 [@@deriving bin_io]
 
+let enable_debug = ref false
+let debug_output =
+  let stderr = Lazy.force Writer.stderr in
+  fun s ->
+  Writer.write_line stderr s
+
 module Counter : sig
   type t
   val make : int -> t
@@ -193,7 +199,7 @@ let remote_how invocation =
   How_to_run.wrap How_to_run.local ~f:(fun { prog=_; args } ->
       (* A bit a a hack to get the right executable name into the invocation *)
       let inv = invocation @ (Sys.get_argv ()).(0) :: args in
-      print_endline ("Invocation: " ^ String.concat ~sep:" " inv);
+      debug_output ("Invocation: " ^ String.concat ~sep:" " inv);
       let prog = List.hd_exn inv in
       let args = List.tl_exn inv in
       { prog; args })
@@ -928,7 +934,7 @@ let main
        (Mvar.take reqs >>= function
          | None ->
            (host_abstract_time := 0;
-            print_endline ("removing data from node " ^ target);
+            debug_output ("removing data from node " ^ target);
             (* We have to run this in a loop because in error conditions, sometimes Coq processes are
                still running on remote nodes that prevent files from being deleted. *)
             let rec loop i =
@@ -946,7 +952,7 @@ let main
              let synced_time = Counter.count last_abstract_time in
              let data_host = !data_host in
              (if not @@ String.equal target data_host then begin
-                 print_endline ("rsyncing from data host " ^ data_host ^ " to " ^ target ^
+                 debug_output ("rsyncing from data host " ^ data_host ^ " to " ^ target ^
                                 " at time " ^ string_of_int t ^ "/" ^
                                 string_of_int (Counter.count last_abstract_time));
                  let exclude =
@@ -1137,6 +1143,8 @@ let command =
      and+ max_running = flag "max-running" (optional int)
          ~doc:"int The maximum number of resource requests that can be requested and running at the same time. \
                Infinite by default."
+     and+ debug = flag "debug" (optional_with_default false bool)
+         ~doc:"bool Show additional debug info on stderr."
      and+ benchmark_data = anon ("benchmark-data" %: string)
      and+ benchmark_target = anon ("benchmark-target" %: string)
      and+ benchmark_repo = anon ("benchmark-repo" %: string)
@@ -1148,6 +1156,7 @@ let command =
      and+ max_requests = anon ("max-requests" %: int)
      and+ packages = anon (non_empty_sequence_as_list ("package" %: string))
      in fun () ->
+       enable_debug := debug;
        Sys.file_exists benchmark_data >>= function
        | `Unknown | `No -> Deferred.Or_error.error_string "Benchmark data directory does not exist"
        | `Yes ->
