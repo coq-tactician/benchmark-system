@@ -997,7 +997,7 @@ let main
      let { jobs; wait_for_data } = String.Map.find_exn !hosts hostname in
      let jobs = String.Set.remove jobs job_name in
      hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
-     if String.Set.is_empty jobs then wait_for_data None else Deferred.unit in
+     if String.Set.is_empty jobs then (print_endline "waiting for removal"; wait_for_data None) else Deferred.unit in
    let with_job ~job_name ~hostname f =
      add_job ~job_name ~hostname;
      Monitor.protect ~finally:(fun () ->
