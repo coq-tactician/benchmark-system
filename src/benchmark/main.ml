@@ -42,7 +42,8 @@ let enable_debug = ref false
 let debug_output =
   let stderr = Lazy.force Writer.stderr in
   fun s ->
-  Writer.write_line stderr s
+    if !enable_debug then
+      Writer.write_line stderr s
 
 module Counter : sig
   type t
