@@ -1,6 +1,6 @@
 #!/bin/bash
 # Number of minutes a task is allowed to run; for a local task this should not be limited.
-echo 3600
+echo 60
 # For allocated resources, this is the command line invocation to run a program within those resources.
 # Here, we allow the bencharking system to run two commands,
 # because on the CIIRC cluster one CPU has two hyperthreads.
