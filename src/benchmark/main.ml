@@ -841,6 +841,7 @@ let task_disseminator
         ; Deferred.choice (Clock_ns.at (Time_ns.sub deadline lemma_time')) (fun () -> `Out_of_time)
         ; Deferred.choice error_occurred (fun () -> `Error) ] >>= function
       | `Out_of_time | `Available `Eof | `Error ->
+        print_endline ("allocator loop of job " ^ job_name ^ " on host " ^ hostname ^ " stopping");
         Deferred.return `Stop
       | `Available `Race ->
         Pipe.write stderr "Race condition during task dissemination. Trying again.\n" >>= fun () ->
@@ -995,13 +996,13 @@ let main
                    ; wait_for_data = copier hostname }
          | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name });
      let { jobs; _ } = String.Map.find_exn !hosts hostname in
-     print_endline ("Added job to " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs))
+     print_endline ("Added job " ^ job_name ^ " to " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs))
    in
    let remove_job ~job_name ~hostname =
      let { jobs; wait_for_data } = String.Map.find_exn !hosts hostname in
      let jobs = String.Set.remove jobs job_name in
      hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
-     print_endline ("Removed job from " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs));
+     print_endline ("Removed job " ^ job_name ^ " from " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs));
      if String.Set.is_empty jobs then
        (print_endline ("waiting for data deletion on " ^ hostname); wait_for_data None) else Deferred.unit in
    let with_job ~job_name ~hostname f =
