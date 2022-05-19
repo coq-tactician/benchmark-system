@@ -934,11 +934,18 @@ let main
          | None ->
            (host_abstract_time := 0;
             print_endline ("removing data from node " ^ target);
-            Process.run
-              ~prog:"ssh"
-              ~args:[target; "rm"; "-rf"; scratch] () >>= function
-            | Error e -> Pipe.write error_writer e
-            | Ok _out -> Deferred.unit)
+            (* We have to run this in a loop because in error conditions, sometimes Coq processes are
+               still running on remote nodes that prevent files from being deleted. *)
+            let rec loop i =
+              Process.run
+                ~prog:"ssh"
+                ~args:[target; "rm"; "-rf"; scratch] () >>= function
+              | Error e -> if i = 0 then Pipe.write error_writer e else begin
+                  Writer.write stdout ("Could not delete " ^ target ^ ":" ^ scratch ^ ". Trying again");
+                  Clock.after (Time.Span.of_sec 10.) >>= fun () -> loop (i - 1)
+                end
+            | Ok _out -> Deferred.unit in
+            loop 10)
          | Some (full, t) ->
            if not full && !host_abstract_time >= t then Deferred.unit else
              let synced_time = Counter.count last_abstract_time in
