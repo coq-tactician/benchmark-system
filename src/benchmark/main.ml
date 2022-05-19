@@ -225,6 +225,7 @@ let run_processor
      task_allocator ~job_name ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
+       print_endline ("Processor " ^ job_name ^ " on host " ^ hostname ^ " received task");
        let continue lemma =
          let ivar = Ivar.create () in
          Pipe.write lemma_disseminator (deadline, lemma, ivar) >>= fun () ->
