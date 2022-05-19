@@ -1141,20 +1141,60 @@ let command =
      and+ injection_files = flag "inject-file" (listed string)
          ~doc:"file Inject a file containing Coq vernacular into the compilation and benchmarking process. \
                Typically used to specify options. Can be repeated multiple times and combined with -inject-file."
-     and+ max_running = flag "max-running" (optional int)
-         ~doc:"int The maximum number of resource requests that can be requested and running at the same time. \
-               Infinite by default."
      and+ debug = flag "debug" no_arg
-         ~doc:"bool Show additional debug info on stderr."
-     and+ benchmark_data = anon ("benchmark-data" %: string)
-     and+ benchmark_target = anon ("benchmark-target" %: string)
-     and+ benchmark_repo = anon ("benchmark-repo" %: string)
+         ~doc:"Show additional debug info on stderr."
+     and+ benchmark_data = flag "benchmark-data" (required string)
+         ~doc:"dir Location of the benchmark-data storage repository."
+     and+ benchmark_target = flag "benchmark-target" (required string)
+         ~doc:"string Name of the Opam package containing the model that should be benchmarked. This can be any \
+              package that depends on coq-tactician."
+     and+ benchmark_repo = flag "benchmark-repo" (required string)
+         ~doc:"URI The repository where the benchmark target can be found. Accepts any URI that is accepted by Opam."
      (* TODO: Convert branches to commits *)
-     and+ benchmark_commit = anon ("benchmark-commit" %: string)
-     and+ lemma_time = anon ("benchmark-time" %: int)
-     and+ bench_allocator = anon ("bench-allocator" %: string)
-     and+ compile_allocator = anon ("compile-allocator" %: string)
-     and+ max_requests = anon ("max-requests" %: int)
+     and+ benchmark_commit = flag "benchmark-commit" (required string)
+         ~doc:"hash The hash of the commit that should be benchmarked."
+     and+ lemma_time = flag "benchmark-time" (required int)
+         ~doc:"int Time limit in seconds for synthesizing an individual lemma."
+     and+ compile_allocator = flag "compile-allocator" (required string)
+         ~doc:"executable An executable file that allocates computational resources for the initial compilation \
+               of Opam packages. When executed, this file should request the needed resources, which can come either \
+               from the local machine, from a remote machine through ssh, or from a HPC cluster scheduler. When \
+               the resources have been allocated, the executable should output the prefix of a command that can be \
+               executed in order to access the allocated resources on stdout.
+               Example prefixes:
+               - For local resources, this prefix would be the empty string
+               - For a remote node accessed through ssh, the prefix would be 'ssh remote-node'
+               - For a SLURM cluster, where a job id has been allocated, the prefix would be \
+               'srun --ntasks=1 --jobid $SLURM_JOB_ID'
+               After benchmarking system is finished with the resources, it will print 'done' to the stdin of the \
+               executable. At that point, the executable should relinquish the allocated resources and exit."
+     and+ bench_allocator = flag "bench-allocator" (required string)
+         ~doc:"executable An executable file that allocates computational resources for benchmarking. This file \
+              may be executed many times, as governed by the flags '-max-requests' and '-max-running'. When \
+              executed, this file should request the needed resources to run one or more Coq processes that \
+              benchmark lemmas for a given amount of time. Similar to '-compile-allocator', these resources can be \
+              allocated local, remote through ssh, or through a HPC cluster scheduler. When the resources have \
+              been allocated, the executable should first output a line to stdout indicating the number of \
+              minutes the resources can be used. The benchmarking system may not be able to relinquish the \
+              resources exactly within that time. A safety margin of ~15 minutes is recommended. Then the \
+              executable should output the prefixes of commands that can be executed in order to access the \
+              allocated resources (see '-compile-allocator' for examples). A single outputted prefix will be \
+              used to run a single Coq benchmarking process. This series of prefixes should be followed by the \
+              string 'done'. After the bencharking system is finished with the resources it will print 'done' to \
+              the stdin of the executable. At that point the executable should relinquish the allocated resources \
+              and exit."
+     and+ max_requests = flag "max-requests" (required int)
+         ~doc:"int The maximum number of benchmark resource allocations that may be running at the same time. \
+               Related to '-bench-allocator'. This governs how much load may be applied to queueing mechanism \
+               of the underlying HPC cluster. The higher this number, the more resources will be requested at \
+               the same time. When this number is low, the benchmarking system may be starved of resources on \
+              busy clusters. When this number is high, this may flood the underlying queue, which may annoy other \
+              users of the cluster. NOTE: This flag does not limit the total number of resources allocated. For \
+              that, see '-max-running'."
+     and+ max_running = flag "max-running" (optional int)
+         ~doc:"int The maximum number of benchmark resources requests that can be requested and running at the same \
+               time. See also '-max-requests'. WARNING: This number is infinite by default, which is likely not \
+               appropriate for local resources."
      and+ packages = anon (non_empty_sequence_as_list ("package" %: string))
      in fun () ->
        enable_debug := debug;
