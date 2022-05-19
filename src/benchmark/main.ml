@@ -1136,7 +1136,7 @@ Input:
 Output:
   - Every requested lemma will be benchmarked, and the results will be uploaded to the 'benchmark-data'
     repository of the coq-tactician Github organization.
-Details:
+Usage Details:
   For details, please read the description of the flags below.
 Examples:
   - Running a benchmark of coq-tactician-stdlib on a single computer with a time limit of 40 seconds.
