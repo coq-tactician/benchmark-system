@@ -992,12 +992,17 @@ let main
      hosts := String.Map.update !hosts hostname ~f:(function
          | None -> { jobs = String.Set.singleton job_name
                    ; wait_for_data = copier hostname }
-         | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name }) in
+         | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name });
+     let { jobs; _ } = String.Map.find_exn !hosts hostname in
+     print_endline ("Added job to " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs))
+   in
    let remove_job ~job_name ~hostname =
      let { jobs; wait_for_data } = String.Map.find_exn !hosts hostname in
      let jobs = String.Set.remove jobs job_name in
      hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
-     if String.Set.is_empty jobs then (print_endline "waiting for removal"; wait_for_data None) else Deferred.unit in
+     print_endline ("Removed job from " ^ hostname ^ " : " ^ string_of_int (String.Set.length jobs));
+     if String.Set.is_empty jobs then
+       (print_endline ("waiting for data deletion on " ^ hostname); wait_for_data None) else Deferred.unit in
    let with_job ~job_name ~hostname f =
      add_job ~job_name ~hostname;
      Monitor.protect ~finally:(fun () ->
