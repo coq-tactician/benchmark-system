@@ -1137,7 +1137,7 @@ let rmrf path =
 (* TODO: This can be much better, look at the bos package. *)
 let with_temp parent cont =
   let (/) = Filename.concat in
-  Unix.mkdtemp (parent/"tactician-benchmark") >>= fun d ->
+  Unix.mkdtemp (parent/"tactician") >>= fun d ->
   try_with (fun () -> cont d) >>= fun res ->
   rmrf d >>| fun () -> match res with
   | Ok x -> x
