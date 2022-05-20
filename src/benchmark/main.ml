@@ -1171,8 +1171,8 @@ Examples:
     compilation does not interfere with the benchmarking.
     tactician-benchmark \
         -benchmark-data ./benchmark-data/ \
-        -compile-allocator ./benchmark-system/local_compile_allocator \
-        -bench-allocator ./benchmark-system/local_bench_allocator \
+        -compile-allocator ./benchmark-system/local/compile_allocator \
+        -bench-allocator ./benchmark-system/local/bench_allocator \
         -max-requests 16 \
         -max-running 16 \
         -delay-benchmark \
@@ -1186,8 +1186,8 @@ Examples:
     the number of simultaneous allocated resources.
     tactician-benchmark \
         -benchmark-data ./benchmark-data/ \
-        -compile-allocator ./benchmark-system/slurm_compile_allocator \
-        -bench-allocator ./benchmark-system/slurm_bench_allocator \
+        -compile-allocator ./benchmark-system/slurm/compile_allocator \
+        -bench-allocator ./benchmark-system/slurm/bench_allocator \
         -max-requests 28 \
         -benchmark-target coq-tactician \
         -benchmark-repo git+ssh://git@github.com/coq-tactician/coq-tactician \
