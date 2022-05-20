@@ -1210,7 +1210,7 @@ Examples:
                are ignored."
      and lemmas_include_regexp = flag "include-regexp"
          (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `IncludeRegexp x)))
-         ~doc:"refexp A regular expression matching lemmas. Only lemmas matching the expression are benchmarked."
+         ~doc:"regexp A regular expression matching lemmas. Only lemmas matching the expression are benchmarked."
      and lemmas_exclude_regexp = flag "exclude-regexp"
          (map_flag (optional string) ~f:(Option.map ~f:(fun x -> `ExcludeRegexp x)))
          ~doc:"regexp A regular expression matching lemmas. Only lemmas not matching the expression are benchmarked."

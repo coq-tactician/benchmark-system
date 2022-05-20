@@ -158,7 +158,7 @@ tactician-benchmark PACKAGE [PACKAGE ...]
                                  lemma names that should be benchmarked. Other
                                  lemmas
                                  are ignored.
-  [-include-regexp refexp]       A regular expression matching lemmas. Only
+  [-include-regexp regexp]       A regular expression matching lemmas. Only
                                  lemmas matching the expression are benchmarked.
   [-inject vernacular] ...       Inject Coq vernacular into the compilation and
                                  benchmarking process. Typically used to specify
