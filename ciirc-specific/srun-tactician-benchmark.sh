@@ -21,17 +21,19 @@ eval $(opam env)
 ulimit -n 4096
 
 EXIT_CODE=0
-srun --job-name="$NAME" --cpus-per-task=1 --time=08:00:00 --mem-per-cpu=1000 --partition compute --ntasks=1 \
-     tactician-benchmark \
-     -benchmark-data /home/blaaulas/tactician/benchmark-data/ \
-     -compile-allocator /home/blaaulas/tactician/benchmark-system/slurm/compile_allocator \
-     -bench-allocator /home/blaaulas/tactician/benchmark-system/slurm/bench_allocator \
-     -max-requests 28 \
-     -tmp-dir /lscratch/blaaulas/ \
-     -benchmark-target "$TARGET" \
-     -benchmark-repo "$REPO" \
-     -benchmark-commit "$COMMIT" \
-     -benchmark-time "$TIME" \
-     "$PACKAGE" \
+# Run the command on the head node for now. It does not do much anyway
+#srun --job-name="$NAME" --cpus-per-task=1 --time=08:00:00 --mem-per-cpu=1000 --partition compute --ntasks=1 \
+
+tactician-benchmark \
+    -benchmark-data /home/blaaulas/tactician/benchmark-data/ \
+    -compile-allocator /home/blaaulas/tactician/benchmark-system/slurm/compile_allocator \
+    -bench-allocator /home/blaaulas/tactician/benchmark-system/slurm/bench_allocator \
+    -max-requests 28 \
+    -tmp-dir /lscratch/blaaulas/ \
+    -benchmark-target "$TARGET" \
+    -benchmark-repo "$REPO" \
+    -benchmark-commit "$COMMIT" \
+    -benchmark-time "$TIME" \
+    "$PACKAGE" \
     || EXIT_CODE=$?
 echo $EXIT_CODE > /home/blaaulas/tactician/last-status
