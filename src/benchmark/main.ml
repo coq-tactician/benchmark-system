@@ -949,7 +949,8 @@ let main
    write_bench_params ~scratch >>= fun extra_args ->
 
    let last_abstract_time = Counter.make 1 in
-   let data_host = ref @@ Unix.gethostname () in
+   let self = Unix.gethostname () in
+   let data_host = ref @@ self in
    let data_host_prefix = ref "" in
    let data_host_rsyncs_active = ref @@ String.Map.singleton !data_host Deferred.unit in
    let hosts = ref String.Map.empty in
@@ -997,10 +998,18 @@ let main
                     ; "*.glob"
                     ; "*.aux"] in
                 let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
-                let rsync_remote_shell = "rsync-preprocess " ^ prefix ^ " rsync-preprocess-marker" in
-                let prog, args = prefix_invocation data_host_prefix
-                    ([ "rsync"; "-e"; rsync_remote_shell; "-qa"] @ exclude @
-                     [ scratch^"/"; target^":"^scratch^"/" ]) in
+                let copydir = scratch^"/" in
+                let prog, args =
+                  if String.equal target self then
+                    let rsync_remote_shell = "rsync-preprocess " ^ data_host_prefix ^ " rsync-preprocess-marker" in
+                    prefix_invocation ""
+                      ([ "rsync"; "-e"; rsync_remote_shell; "-qa"] @ exclude @
+                       [ data_host^":"^copydir; copydir])
+                  else
+                    let rsync_remote_shell = "rsync-preprocess " ^ prefix ^ " rsync-preprocess-marker" in
+                    prefix_invocation data_host_prefix
+                      ([ "rsync"; "-e"; rsync_remote_shell; "-qa"] @ exclude @
+                       [ copydir; target^":"^copydir]) in
                 debug_output ("Rsyncing from data host " ^ data_host ^ " to " ^ target ^
                               " at time " ^ string_of_int t ^ "/" ^
                               string_of_int (Counter.count last_abstract_time) ^ "\nInvocation: " ^ prog ^ " " ^
@@ -1063,7 +1072,7 @@ let main
 
    (* This job is running the entire session *)
    let main_job = "main_job" in
-   add_job ~job_name:main_job ~hostname:(Unix.gethostname ());
+   add_job ~job_name:main_job ~hostname:self;
 
    compile_and_retrieve_benchmark_info
      ~error_writer ~error_occurred
