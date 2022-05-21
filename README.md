@@ -33,7 +33,7 @@ assumptions over this cluster:
 ## Installation:
 Make sure that you have an Opam switch available. Then clone this repository, and from the root of the repo run
 ```
-opam intsall .
+opam install .
 ```
 
 ## Usage Details:
