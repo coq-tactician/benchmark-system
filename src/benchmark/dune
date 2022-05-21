@@ -6,6 +6,12 @@
  (preprocess (pps ppx_jane)))
 
 (executable
+ (public_name rsync-preprocess)
+ (name rsync_preprocess)
+ (libraries unix)
+ (modules rsync_preprocess))
+
+(executable
  (public_name opam-build)
  (name opam_build)
  (modules opam_build)
