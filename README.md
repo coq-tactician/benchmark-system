@@ -12,6 +12,24 @@ The distributed benchmarking system of Tactician.
 - Every requested lemma will be benchmarked, and the results will be uploaded to the 'benchmark-data'
   repository of the coq-tactician Github organization.
 
+## Environment requirements
+This software is designed to be run on a compute cluster (possibly consisting of one machine). We make some
+assumptions over this cluster:
+- In order to install the software, the Opam package manager version 2.x needs to be available (you can check
+  the version by running `opam --version`).
+- During operation, a working version of Bubblewrap is required. You can check that Bubblewrap functions properly
+  by running `bwrap --dev-bind / / echo "bubblewrap is working!"`.
+- Additional required software is Git, Rsync and Bash.
+- It is assumed that the cluster is configured uniformly. That is:
+  + This software should be installed on all nodes with the same version and in the same location. The easiest way
+    to ensure this is using a shared filesystem. The alternative is to carefully install the software manually and
+    keep it consistent.
+  + A storage location for temporary files is required that has the same path on every node. This location is
+    currently assumed **not** to be on a shared filesystem.
+  + Nodes should be connected to a shared network and be able to communicate with each other over TCP.
+  + The system needs the ability to spawn processes on other remote nodes, either through SSH or
+    through commands provided by a HPC cluster orchestrator.
+
 ## Installation:
 Make sure that you have an Opam switch available. Then clone this repository, and from the root of the repo run
 ```
