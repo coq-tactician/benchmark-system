@@ -1058,6 +1058,7 @@ let main
      >>= fun () ->
      data_host_rsyncs_active := String.Map.set !data_host_rsyncs_active ~key:new_host ~data:Deferred.unit;
      data_host := new_host;
+     data_host_prefix := new_prefix;
      String.Map.find_exn !data_host_rsyncs_active old_host in
 
    (* This job is running the entire session *)
