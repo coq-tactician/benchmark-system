@@ -195,25 +195,30 @@ module Cmd_worker = struct
   include Rpc_parallel.Make (T)
 end
 
-let remote_how invocation =
+let prefix_invocation prefix cmd =
+  let prefix = Arg_parser.split prefix in
+  let cmd = prefix @ cmd in
+  let prog = List.hd_exn cmd in
+  let args = List.tl_exn cmd in
+  prog, args
+
+let remote_how prefix =
   let open Rpc_parallel in
   How_to_run.wrap How_to_run.local ~f:(fun { prog=_; args } ->
       (* A bit a a hack to get the right executable name into the invocation *)
-      let inv = invocation @ (Sys.get_argv ()).(0) :: args in
-      debug_output ("Invocation: " ^ String.concat ~sep:" " inv);
-      let prog = List.hd_exn inv in
-      let args = List.tl_exn inv in
+      let prog, args = prefix_invocation prefix ((Sys.get_argv ()).(0) :: args) in
+      debug_output ("Invocation: " ^ prog ^ " " ^ String.concat ~sep:" " args);
       { prog; args })
 
 let run_processor
-    ~invocation
+    ~prefix
     ~error_writer ~error_occurred
     ~task_allocator
     ~reporter ~coq_out ~coq_err ~processor_out ~processor_err ~job_time ~job_name with_job =
   let deadline = Time_ns.add (Time_ns.now ()) job_time in
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   (Cmd_worker.spawn_in_foreground
-     ~how:(remote_how invocation)
+     ~how:(remote_how prefix)
      ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
      ~shutdown_on:Connection_closed
      { name = job_name }
@@ -229,7 +234,7 @@ let run_processor
      ~f:Cmd_worker.functions.hostname
      ~arg:() >>=? fun hostname ->
    let rec loop () =
-     task_allocator ~hostname deadline >>= function
+     task_allocator ~prefix ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
        let continue lemma =
@@ -275,19 +280,19 @@ let run_processor
        >>=? fun _processed_lemmas ->
        relinquish ();
        loop () in
-   with_job ~job_name ~hostname loop) >>= fun res ->
+   with_job ~prefix ~job_name ~hostname loop) >>= fun res ->
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
    (Process.wait process >>= function
      | Ok () -> Deferred.unit
      | Error (`Exit_non_zero i) ->
-       let err = "Abnormal exit code for command worker: " ^ job_name ^ " with invocation " ^
-                 String.concat ~sep:" " invocation ^ ". Code: " ^ string_of_int i in
+       let err = "Abnormal exit code for command worker: " ^ job_name ^ " with prefix " ^
+                 prefix ^ ". Code: " ^ string_of_int i in
        Pipe.write processor_err err >>= fun () ->
        Pipe.write error_writer (Error.of_string err)
      | Error (`Signal s) ->
-       let err = "Abnormal exit signal for command worker: " ^ job_name ^ " on host " ^
-                 String.concat ~sep:" " invocation ^ ". Signal: " ^ Signal.to_string s in
+       let err = "Abnormal exit signal for command worker: " ^ job_name ^ " with prefix " ^
+                 prefix ^ ". Signal: " ^ Signal.to_string s in
        Pipe.write processor_err err >>= fun () ->
        Pipe.write error_writer (Error.of_string err)) >>| fun () -> res)
   >>= function
@@ -376,7 +381,8 @@ let compile_and_retrieve_benchmark_info
     ~benchmark_commit
     ~packages
     ~injections_extra
-    ~add_job ~remove_job ~switch_data_host ~final_data_host =
+    ~add_job ~remove_job ~switch_data_host
+    ~final_data_prefix ~final_data_host =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
   Process.create
@@ -399,10 +405,9 @@ let compile_and_retrieve_benchmark_info
   | `Allocated `Eof ->
     Signal.send_i Signal.int (`Group (Process.pid p));
     Process.wait p >>| fun _ -> Or_error.errorf "Compile alloc protocol error: Unexpected eof"
-  | `Allocated `Ok invocation ->
-    let invocation = Arg_parser.split invocation in
+  | `Allocated `Ok prefix ->
     Build_worker.spawn_in_foreground
-      ~how:(remote_how invocation)
+      ~how:(remote_how prefix)
       ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
       ~shutdown_on:Connection_closed
       ()
@@ -422,7 +427,7 @@ let compile_and_retrieve_benchmark_info
     let job_name = "compile_job" in
     add_job ~job_name ~hostname;
     (* Make sure the initial data is copied over in case the build directory is being reused *)
-    switch_data_host hostname >>= fun () ->
+    switch_data_host ~new_prefix:prefix ~new_host:hostname >>= fun () ->
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
       ~arg:{ root_dir; benchmark_target; benchmark_url = benchmark_repo^"#"^benchmark_commit; packages; injections_extra } >>|? fun r ->
@@ -432,8 +437,8 @@ let compile_and_retrieve_benchmark_info
     r1,
     Pipe.read_all r2 >>= fun timings ->
     let finish =
-      switch_data_host final_data_host >>= fun () ->
-      remove_job ~job_name ~hostname >>= fun () ->
+      switch_data_host ~new_prefix:final_data_prefix ~new_host:final_data_host >>= fun () ->
+      remove_job ~prefix ~job_name ~hostname >>= fun () ->
       Build_worker.Connection.close conn >>= fun () ->
       Deferred.all_unit pipes >>= fun () ->
       Process.wait process >>= (function
@@ -648,15 +653,14 @@ let alloc_benchers =
        let rec loop cont =
          Reader.read_line stdout >>= function
          | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
-         | `Ok invocation ->
-           if String.equal "done" invocation then
+         | `Ok prefix ->
+           if String.equal "done" prefix then
              cont
            else
-             let invocation = Arg_parser.split invocation in
              let job = job_starter
                  ~task_allocator
                  ~job_time:(Time_ns.Span.of_min (float_of_int time))
-                 ~invocation ~job_name:("job" ^ string_of_int (mk_id ())) >>| fun () -> Or_error.return () in
+                 ~prefix ~job_name:("job" ^ string_of_int (mk_id ())) >>| fun () -> Or_error.return () in
              loop (cont >>=? fun () -> job) in
        let cont = loop Deferred.Or_error.ok_unit in
        relinquish_alloc_token ();
@@ -786,7 +790,7 @@ end
 
 type host_data =
   { jobs : String.Set.t
-  ; wait_for_data : (bool * int) option -> unit Deferred.t }
+  ; wait_for_data : string -> (bool * int) option -> unit Deferred.t }
 
 type compile_unit_data =
   { exec_info          : exec_info
@@ -839,7 +843,7 @@ let task_disseminator
                    ; lemma_count
                    ; abstract_time = Counter.count last_abstract_time } :: !data) >>| fun () ->
     ResourceManager.finish lemma_token_queue in
-  let task_allocator ~hostname deadline =
+  let task_allocator ~prefix ~hostname deadline =
     let rec loop () =
       Deferred.choose
         [ Deferred.Choice.map (ResourceManager.allocate lemma_token_queue) ~f:(fun x -> `Available x)
@@ -862,7 +866,7 @@ let task_disseminator
           Deferred.return `Stop
         | Some { exec_info; executors; lemma_disseminator; abstract_time; _ } ->
           Counter.increase executors;
-          wait_for_data ~full:false ~hostname ~time:abstract_time >>| fun () ->
+          wait_for_data ~prefix ~full:false ~hostname ~time:abstract_time >>| fun () ->
           `Task ((fun () -> Counter.decrease executors), exec_info, lemma_disseminator) in
     loop () in
   let allocator =
@@ -946,6 +950,7 @@ let main
 
    let last_abstract_time = Counter.make 1 in
    let data_host = ref @@ Unix.gethostname () in
+   let data_host_prefix = ref "" in
    let data_host_rsyncs_active = ref @@ String.Map.singleton !data_host Deferred.unit in
    let hosts = ref String.Map.empty in
    let copier target =
@@ -956,71 +961,75 @@ let main
        if tcurr >= t then Deferred.unit else wait_for_time t in
      let host_abstract_time = ref 0 in
      let rec loop () =
-       (Mvar.take reqs >>= function
-         | None ->
-           (host_abstract_time := 0;
-            debug_output ("removing data from node " ^ target);
-            (* We have to run this in a loop because in error conditions, sometimes Coq processes are
-               still running on remote nodes that prevent files from being deleted. *)
-            let rec loop i =
-              Process.run
-                ~prog:"ssh"
-                ~args:[target; "rm"; "-rf"; scratch] () >>= function
-              | Error e -> if i = 0 then Pipe.write error_writer e else begin
-                  Writer.write stdout ("Could not delete " ^ target ^ ":" ^ scratch ^ ". Trying again");
-                  Clock.after (Time.Span.of_sec 10.) >>= fun () -> loop (i - 1)
-                end
-            | Ok _out -> Deferred.unit in
-            loop 10)
-         | Some (full, t) ->
-           if not full && !host_abstract_time >= t then Deferred.unit else
-             let synced_time = Counter.count last_abstract_time in
-             let data_host = !data_host in
-             (if not @@ String.equal target data_host then begin
-                 debug_output ("rsyncing from data host " ^ data_host ^ " to " ^ target ^
-                                " at time " ^ string_of_int t ^ "/" ^
-                                string_of_int (Counter.count last_abstract_time));
-                 let exclude =
-                   if full then [ "*.vo.bench" ] else
-                     [ "opam-root/bench/.opam-switch/sources"
-                     ; "opam-root/bench/.opam-switch/build/coq.*"
-                     ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
-                     ; "opam-root/bench/.opam-switch/build/dune.*"
-                     ; "opam-root/bench/.opam-switch/build/dose3.*"
-                     ; "opam-root/download-cache"
-                     ; "opam-root/repo"
-                     ; "*.vo.bench"
-                     ; "*.glob"
-                     ; "*.aux"] in
-                 let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
-                 let args = [ target; "rsync"; "-qa" ] @ exclude @ [ data_host^":"^scratch^"/"; scratch^"/" ] in
-                 let prsync = Process.create
-                     ~prog:"ssh"
-                     ~args () >>=? fun p ->
-                   Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
-                   Process.collect_stdout_and_wait p in
-                 data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
-                     | None -> assert false
-                     | Some m -> prsync >>= fun _ -> m);
-                 prsync >>= function
-                 | Error e ->
-                   if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
-                 | Ok _out -> Deferred.unit
+       (Mvar.take reqs >>= fun (prefix, time) ->
+        match time with
+        | None ->
+          (host_abstract_time := 0;
+           (* We have to run this in a loop because in error conditions, sometimes Coq processes are
+              still running on remote nodes that prevent files from being deleted. *)
+           let prog, args = prefix_invocation prefix ["rm"; "-rf"; scratch] in
+           debug_output ("removing data from node " ^ target ^ "\nInvocation: " ^ prog ^ " " ^
+                         String.concat ~sep:" " args);
+           let rec loop i =
+             Process.run ~prog ~args () >>= function
+             | Error e -> if i = 0 then Pipe.write error_writer e else begin
+                 Writer.write stdout ("Could not delete " ^ target ^ ":" ^ scratch ^ ". Trying again");
+                 Clock.after (Time.Span.of_sec 10.) >>= fun () -> loop (i - 1)
                end
-              else Deferred.unit) >>| fun () ->
-             host_abstract_time := synced_time)
+             | Ok _out -> Deferred.unit in
+           loop 10)
+        | Some (full, t) ->
+          if not full && !host_abstract_time >= t then Deferred.unit else
+            let synced_time = Counter.count last_abstract_time in
+            let data_host = !data_host in
+            let data_host_prefix = !data_host_prefix in
+            (if not @@ String.equal target data_host then begin
+                let exclude =
+                  if full then [ "*.vo.bench" ] else
+                    [ "opam-root/bench/.opam-switch/sources"
+                    ; "opam-root/bench/.opam-switch/build/coq.*"
+                    ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
+                    ; "opam-root/bench/.opam-switch/build/dune.*"
+                    ; "opam-root/bench/.opam-switch/build/dose3.*"
+                    ; "opam-root/download-cache"
+                    ; "opam-root/repo"
+                    ; "*.vo.bench"
+                    ; "*.glob"
+                    ; "*.aux"] in
+                let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
+                let rsync_remote_shell = "rsync-preprocess " ^ prefix ^ " rsync-preprocess-marker" in
+                let prog, args = prefix_invocation data_host_prefix
+                    ([ "rsync"; "-e"; rsync_remote_shell; "-qa"] @ exclude @
+                     [ scratch^"/"; target^":"^scratch^"/" ]) in
+                debug_output ("Rsyncing from data host " ^ data_host ^ " to " ^ target ^
+                              " at time " ^ string_of_int t ^ "/" ^
+                              string_of_int (Counter.count last_abstract_time) ^ "\nInvocation: " ^ prog ^ " " ^
+                              String.concat ~sep:" " args);
+                let prsync = Process.create ~prog ~args () >>=? fun p ->
+                  Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
+                  Process.collect_stdout_and_wait p in
+                data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
+                    | None -> assert false
+                    | Some m -> prsync >>= fun _ -> m);
+                prsync >>= function
+                | Error e ->
+                  if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
+                | Ok _out -> Deferred.unit
+              end
+             else Deferred.unit) >>| fun () ->
+            host_abstract_time := synced_time)
        >>= fun () ->
        Bvar.broadcast update !host_abstract_time;
        loop ()
      in
      (* TODO: This is most likely a memory leak, because the loop never stops *)
      don't_wait_for (loop ());
-     fun time' ->
-       Mvar.update reqs ~f:(fun time ->
-           match time, time' with
-           | None, _ | Some None, _ -> time'
-           | Some (Some _), None -> assert false
-           | Some (Some (full, time)), Some (full', time') -> Some (full || full', Int.max time time'));
+     fun prefix time' ->
+       Mvar.update reqs ~f:(fun x ->
+           match x, time' with
+           | None, _ | Some (_, None), _ -> prefix, time'
+           | Some (_, Some _), None -> assert false
+           | Some (_, Some (full, time)), Some (full', time') -> prefix, Some (full || full', Int.max time time'));
        match time' with
        | None ->
          Bvar.wait update >>| fun _ -> ()
@@ -1031,21 +1040,22 @@ let main
                    ; wait_for_data = copier hostname }
          | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name });
    in
-   let remove_job ~job_name ~hostname =
+   let remove_job ~prefix ~job_name ~hostname =
      let { jobs; wait_for_data } = String.Map.find_exn !hosts hostname in
      let jobs = String.Set.remove jobs job_name in
      hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
-     if String.Set.is_empty jobs then wait_for_data None else Deferred.unit in
-   let with_job ~job_name ~hostname f =
+     if String.Set.is_empty jobs then wait_for_data prefix None else Deferred.unit in
+   let with_job ~prefix ~job_name ~hostname f =
      add_job ~job_name ~hostname;
      Monitor.protect ~finally:(fun () ->
-         remove_job ~job_name ~hostname)
+         remove_job ~prefix ~job_name ~hostname)
        f in
-   let wait_for_data ~full ~hostname ~time =
-     (String.Map.find_exn !hosts hostname).wait_for_data (Some (full, time)) in
-   let switch_data_host new_host =
+   let wait_for_data ~prefix ~full ~hostname ~time =
+     (String.Map.find_exn !hosts hostname).wait_for_data prefix (Some (full, time)) in
+   let switch_data_host ~new_prefix ~new_host =
      let old_host = !data_host in
-     wait_for_data ~full:true ~hostname:new_host ~time:(Counter.count last_abstract_time) >>= fun () ->
+     wait_for_data ~prefix:new_prefix ~full:true ~hostname:new_host ~time:(Counter.count last_abstract_time)
+     >>= fun () ->
      data_host_rsyncs_active := String.Map.set !data_host_rsyncs_active ~key:new_host ~data:Deferred.unit;
      data_host := new_host;
      String.Map.find_exn !data_host_rsyncs_active old_host in
@@ -1064,7 +1074,8 @@ let main
      ~benchmark_commit
      ~packages
      ~injections_extra
-     ~add_job ~remove_job ~switch_data_host ~final_data_host:!data_host
+     ~add_job ~remove_job ~switch_data_host
+     ~final_data_prefix:!data_host_prefix ~final_data_host:!data_host
    >>= function
    | Error e ->
      Pipe.write error_writer e
@@ -1081,10 +1092,10 @@ let main
          ~resources_total:(fun () -> ResourceManager.taken resources_total_queue)
          ~jobs_running:(fun () -> Counter.count jobs_running) in
      (if delay_benchmark then cont else Deferred.unit) >>= fun () ->
-     let job_starter ~task_allocator ~job_time ~invocation ~job_name =
+     let job_starter ~task_allocator ~job_time ~prefix ~job_name =
        Counter.increase jobs_running;
        run_processor
-         ~invocation
+         ~prefix
          ~error_writer ~error_occurred
          ~task_allocator
          ~reporter ~coq_out ~coq_err ~processor_out ~processor_err

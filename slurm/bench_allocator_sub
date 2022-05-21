@@ -4,8 +4,8 @@ echo 60
 # For allocated resources, this is the command line invocation to run a program within those resources.
 # Here, we allow the bencharking system to run two commands,
 # because on the CIIRC cluster one CPU has two hyperthreads.
-echo "srun --ntasks=1 --cpus-per-task=1 --jobid $SLURM_JOB_ID"
-echo "srun --ntasks=1 --cpus-per-task=1 --jobid $SLURM_JOB_ID"
+echo "srun --unbuffered --ntasks=1 --cpus-per-task=1 --jobid $SLURM_JOB_ID"
+echo "srun --unbuffered --ntasks=1 --cpus-per-task=1 --jobid $SLURM_JOB_ID"
 # Signals the end of the allocation protocol.
 echo "done"
 # Wait for the benchmark system to signal it is done with the resources

@@ -1,5 +1,5 @@
 #!/bin/bash
 # For allocated resources, this is the command line invocation to run a program within those resources.
-echo "srun --ntasks=1 --jobid $SLURM_JOB_ID"
+echo "srun --unbuffered --ntasks=1 --jobid $SLURM_JOB_ID"
 # Wait for the benchmark system to signal it is done with the resources
 read
