@@ -926,6 +926,7 @@ let main
     ~benchmark_commit
     ~lemma_time
     ~packages
+    ~shared_filesystem
   =
   let (/) = Filename.concat in
   Process.run
@@ -1043,6 +1044,7 @@ let main
        | None ->
          Bvar.wait update >>| fun _ -> ()
        | Some (_, t) -> wait_for_time t in
+   let copier = if shared_filesystem then fun _ _ _ -> Deferred.unit else copier in
    let add_job ~job_name ~hostname =
      hosts := String.Map.update !hosts hostname ~f:(function
          | None -> { jobs = String.Set.singleton job_name
@@ -1301,6 +1303,9 @@ Examples:
          ~doc:"int The maximum number of benchmark resources requests that can be requested and running at the same \
                time. See also '-max-requests'. WARNING: This number is infinite by default, which is likely not \
                appropriate for local resources."
+     and+ shared_filesystem = flag "shared-filesystem" no_arg
+         ~doc:"Assume that the scratch directory is hosted on a shared filesystem. No copying of files between hosts \
+               is performed."
      and+ packages = anon (non_empty_sequence_as_list ("package" %: string))
      in fun () ->
        enable_debug := debug;
@@ -1328,7 +1333,8 @@ Examples:
            ~injections_extra
            ~scratch ~delay_benchmark
            ~bench_allocator ~compile_allocator ~max_requests ~max_running
-           ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~lemma_time ~packages)
+           ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~lemma_time ~packages
+           ~shared_filesystem)
 
 (* TODO: Use brwap to sandbox to the scratch directory *)
 let () =
