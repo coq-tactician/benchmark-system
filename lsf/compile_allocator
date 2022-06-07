@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+
+import os
+from collections import Counter
+from pathlib import Path
+
+source_path = Path(__file__).resolve()
+source_dir = source_path.parent
+
+jobid = os.getenv("LSB_JOBID")
+hosts = os.getenv("LSB_HOSTS").split(" ")
+host_cnts = Counter(hosts)
+max_cpu_host = max(host_cnts, key=lambda h: host_cnts[h])
+
+#print(f"blaunch {max_cpu_host}")
+#print(f"battach -m {max_cpu_host} -L {source_dir / "exec-from-stdin"} {jobid}")
+print(f"{source_dir / 'exec-through-stdin'} {jobid} {max_cpu_host}")
+

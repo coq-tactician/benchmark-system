@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+
+import os
+from collections import Counter
+
+hosts = os.getenv("LSB_HOSTS").split(" ")
+host_cnts = Counter(hosts)
+max_cpu_host = max(host_cnts, key=lambda h: host_cnts[h])
+
+print("999999")  #infinite minutes
+
+for host in host_cnts:
+    print(f"blaunch {host}")
+
+print("done")
