@@ -24,8 +24,9 @@ assumptions over this cluster:
   + This software should be installed on all nodes with the same version and in the same location. The easiest way
     to ensure this is using a shared filesystem. The alternative is to carefully install the software manually and
     keep it consistent.
-  + A storage location for temporary files is required that has the same path on every node. This location is
-    currently assumed **not** to be on a shared filesystem.
+  + A storage location for temporary files is required that has the same path on every node. By default it is
+    assumed that this location is not on a shared filesystem. This assumption is governed by the `-shared-filesystem`
+    flag.
   + Nodes should be connected to a shared network and be able to communicate with each other over TCP.
   + The system needs the ability to spawn processes on other remote nodes, either through SSH or
     through commands provided by a HPC cluster orchestrator.
@@ -193,6 +194,9 @@ tactician-benchmark PACKAGE [PACKAGE ...]
                                  WARNING: This number is infinite by default,
                                  which is likely not appropriate for local
                                  resources.
+  [-shared-filesystem]           Assume that the scratch directory is hosted on
+                                 a shared filesystem. No copying of files
+                                 between hosts is performed.
   [-tmp-dir dir]                 Location in which a temporary directory will be
                                  created to store the build. If not supplied, it
                                  is taken from $TMPDIR. After the benchmark is
