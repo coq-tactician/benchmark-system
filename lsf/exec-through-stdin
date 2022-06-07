@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+from subprocess import *
+import sys
+
+pipe_process = Popen(["./write-cmd-to-stdin"] + sys.argv[1:], stdout=PIPE)
+exec_process = Popen(["./exec-from-stdin"], stdin=pipe_process.stdout)
+pipe_process.stdout.close()  # Allow pipe_process to receive a SIGPIPE if grep_process exits.
+exec_process.communicate() # Wait for exec_process, but not for pipe_process

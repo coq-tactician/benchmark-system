@@ -1,0 +1,4 @@
+#!/bin/bash
+printf "%q " "$@"
+printf "\n"
+cat

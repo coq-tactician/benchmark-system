@@ -1,0 +1,3 @@
+#!/bin/bash
+read command
+eval "exec $command"
