@@ -1,7 +1,16 @@
 #!/bin/bash
+read location
+cd $location
+finished=false
+while ! $finished; do
+    read envvar
+    # At some point
+    if [ $envvar = "env-done" ]
+    then
+        finished=true
+    else
+        eval "$envvar"
+    fi
+done
 read command
-source $HOME/miniconda3/etc/profile.d/conda.sh
-conda activate /dccstor/mathzero/benchmark/venv
-cd /dccstor/mathzero/benchmark
-opam $(eval env)
 eval "exec $command"

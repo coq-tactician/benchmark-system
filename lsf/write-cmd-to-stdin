@@ -1,4 +1,7 @@
 #!/bin/bash
+echo $PWD
+env | grep -v -P 'LSB_.*=|_=|PWD=|OLDPWD='
+echo "env-done"
 printf "%q " "$@"
 printf "\n"
-cat
+exec cat

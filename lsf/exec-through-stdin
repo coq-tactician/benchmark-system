@@ -11,10 +11,12 @@ jobid = sys.argv[1]
 cmds = sys.argv[3:]
 
 pipe_process = Popen([source_dir / "write-cmd-to-stdin"] + cmds, stdout=PIPE)
-exec_process = Popen(["battach", "-L", source_dir / "exec-from-stdin", jobid], stdin=pipe_process.stdout, stdout=PIPE)
-tail_process = Popen([source_dir / "test"], stdin=exec_process.stdout)
+exec_process = Popen(["battach", "-L", source_dir / "exec-from-stdin", jobid], stdin=pipe_process.stdout)
+# tail_process = Popen([source_dir / "test"], stdin=exec_process.stdout)
 pipe_process.stdout.close()  # Allow pipe_process to receive a SIGPIPE if grep_process exits.
 #exec_process.communicate() # Wait for exec_process, but not for pipe_process
-exec_process.stdout.close()  # Allow pipe_process to receive a SIGPIPE if grep_process exits.
-tail_process.communicate()
+# exec_process.stdout.close()  # Allow pipe_process to receive a SIGPIPE if grep_process exits.
+exec_process.communicate()
+pipe_process.terminate()
+pipe_process.wait()
 #tail_process.stdout.close()
