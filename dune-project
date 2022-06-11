@@ -12,7 +12,7 @@
  (name tactician-benchmark)
  (synopsis "Benchmarking for Tactician")
  (depends
-  (ocaml (>= 4.08))
+  (ocaml (>= 4.12.0))
    dune
   (dune-site (>= 2.9.1))
   (opam-client (>= 2.1.0))

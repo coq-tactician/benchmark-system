@@ -140,8 +140,17 @@ module Cmd_worker = struct
           ~working_dir:dir
           ~prog:"chmod"
           ~args:["+rw"; "-R"; dir] () >>=? fun _ ->
+        let env =
+          List.map ~f:(fun s ->
+              match OpamStd.String.cut_at s '=' with
+              | None   -> s, None
+              | Some (key, value) ->
+                if String.equal key "PATH" then
+                  key, Some (value ^ ":" ^ Unix.getenv_exn "PATH")
+                else key, Some value
+            ) @@ Array.to_list env in
         Spawn_with_socket.create
-          ~env:(`Replace_raw (Array.to_list env))
+          ~env:(`Override env)
           ~working_dir:dir
           ~prog:"bwrap"
           ~args
@@ -309,6 +318,11 @@ module Build_worker = struct
                ; packages : string list
                ; injections_extra : string list } [@@deriving bin_io]
     end
+    module Prereq = struct
+      type t = { dir : string
+               ; repo : string
+               ; commit : string } [@@deriving bin_io]
+    end
     module Response = struct
       type t =
         [ `Info of pre_bench_info
@@ -321,7 +335,8 @@ module Build_worker = struct
     end
     type 'worker functions =
       { hostname : ('worker, unit, string) Rpc_parallel.Function.t
-      ; build    : ('worker, Cmd.t, Response.t Pipe.Reader.t) Rpc_parallel.Function.t }
+      ; build    : ('worker, Cmd.t, Response.t Pipe.Reader.t) Rpc_parallel.Function.t
+      ; prereq    : ('worker, Prereq.t, string) Rpc_parallel.Function.t }
 
     module Worker_state = struct
       type init_arg = unit [@@deriving bin_io]
@@ -344,6 +359,42 @@ module Build_worker = struct
       let hostname =
         C.create_rpc ~f:hostname_impl ~bin_input:Unit.bin_t ~bin_output:String.bin_t ()
 
+      let prereq_impl ~worker_state:() ~conn_state:()
+          Prereq.{ dir; repo; commit} =
+        let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
+        let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
+        (Sys.file_exists dir >>= fun exists ->
+         (match exists with
+          | `No | `Unknown -> Deferred.Or_error.return ()
+          | `Yes -> Process.run ~prog:"rm" ~args:["-rf"; dir] () >>|? fun _ -> ()) >>=? fun () ->
+         Unix.mkdir dir >>= fun () ->
+         let cmds =
+           [ "git", ["init"]
+           ; "git", ["remote"; "add"; "origin"; repo]
+           ; "git", ["fetch"; "--depth"; "1"; "origin"; commit]
+           ; "git", ["checkout"; "FETCH_HEAD"]] in
+         (Deferred.Or_error.List.iter cmds ~f:(fun (prog, args) ->
+              Process.run ~working_dir:dir ~prog ~args () >>|? fun _ -> ())) >>=? fun () ->
+         let prereq_file = Filename.concat dir "prerequisites" in
+         (Sys.file_exists prereq_file >>= function
+           | `No | `Unknown -> Deferred.Or_error.return ()
+           | `Yes ->
+             Process.create ~working_dir:dir ~prog:prereq_file ~args:[] () >>=? fun p ->
+             let pipes = [ Reader.transfer (Process.stderr p) stderr
+                         ; Reader.transfer (Process.stdout p) stdout ] in
+             (Deferred.all_unit pipes >>= fun () -> Process.wait p >>= function
+               | Ok () -> Deferred.Or_error.return ()
+               | Error _ -> Deferred.Or_error.errorf "Prerequisites file error")) >>=? fun () ->
+         let update_env_file = Filename.concat dir "update-env" in
+         (Sys.file_exists update_env_file >>= function
+           | `No | `Unknown -> Deferred.Or_error.return ""
+           | `Yes -> Process.run ~working_dir:dir ~prog:update_env_file ~args:[] ())) >>= function
+        | Ok env -> Deferred.return env
+        | Error e -> raise (Error.to_exn e)
+
+      let prereq =
+        C.create_rpc ~f:prereq_impl ~bin_input:Prereq.bin_t ~bin_output:bin_string ()
+
       let build_impl ~worker_state:() ~conn_state:()
           Cmd.{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } =
         compile_and_retrieve_benchmark_info
@@ -362,7 +413,7 @@ module Build_worker = struct
       let build =
         C.create_pipe ~f:build_impl ~bin_input:Cmd.bin_t ~bin_output:Response.bin_t ()
 
-      let functions = { hostname; build }
+      let functions = { hostname; build; prereq }
       let init_worker_state s = return s
       let init_connection_state ~connection:_ ~worker_state:_ = return
     end
@@ -375,7 +426,7 @@ let compile_and_retrieve_benchmark_info
     ~error_writer ~error_occurred
     ~compile_allocator
     ~opam_out ~opam_err ~opam_timings
-    ~root_dir
+    ~scratch
     ~benchmark_target
     ~benchmark_repo
     ~benchmark_commit
@@ -429,8 +480,19 @@ let compile_and_retrieve_benchmark_info
     (* Make sure the initial data is copied over in case the build directory is being reused *)
     switch_data_host ~new_prefix:prefix ~new_host:hostname >>= fun () ->
     Build_worker.Connection.run conn
+      ~f:Build_worker.functions.prereq
+      ~arg:{ dir = Filename.concat scratch "target-source"; repo = benchmark_repo; commit = benchmark_commit } >>=? fun env ->
+    let env = String.split_lines env in
+    List.iter ~f:(fun s ->
+        let key, data = match OpamStd.String.cut_at s '=' with
+          | None   -> s, ""
+          | Some p -> p in
+        Unix.putenv ~key ~data
+      ) env;
+    Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
-      ~arg:{ root_dir; benchmark_target; benchmark_url = benchmark_repo^"#"^benchmark_commit; packages; injections_extra } >>|? fun r ->
+      ~arg:{ root_dir = Filename.concat scratch "opam-root"; benchmark_target
+           ; benchmark_url = benchmark_repo^"#"^benchmark_commit; packages; injections_extra } >>|? fun r ->
     let r1, r2 = Pipe.fork ~pushback_uses:`Fast_consumer_only r in
     let r1 = Pipe.filter_map r1 ~f:(function | `Info info -> Some info | `Timings _ -> None) in
     let r2 = Pipe.filter_map r2 ~f:(function | `Info _ -> None | `Timings timings -> Some timings) in
@@ -1080,7 +1142,7 @@ let main
      ~error_writer ~error_occurred
      ~compile_allocator
      ~opam_out ~opam_err ~opam_timings
-     ~root_dir:(scratch/"opam-root")
+     ~scratch
      ~benchmark_target
      ~benchmark_repo
      ~benchmark_commit
