@@ -497,7 +497,7 @@ let compile_and_retrieve_benchmark_info
           let new_paths = String.split data ~on:':' in
           let old_paths = String.split (Unix.getenv_exn "PATH") ~on:':' in
           let new_paths = String.concat ~sep:":" @@
-            List.filter ~f:(fun p -> List.exists old_paths ~f:(String.equal p)) new_paths in
+            List.filter ~f:(fun p -> not @@ List.exists old_paths ~f:(String.equal p)) new_paths in
           print_endline ("PATH_EXTRA=" ^ new_paths);
           Unix.putenv ~key:"PATH_EXTRA" ~data:new_paths
         else
