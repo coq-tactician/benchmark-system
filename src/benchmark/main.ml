@@ -141,7 +141,8 @@ module Cmd_worker = struct
               | None   -> s, None
               | Some (key, value) ->
                 if String.equal key "PATH" then
-                  key, Some (value ^ ":" ^ Unix.getenv_exn "PATH")
+                  key, Some (Option.value ~default:""
+                               (Option.map ~f:(fun p -> p^":") @@ Unix.getenv "PATH_EXTRA") ^ value)
                 else key, Some value
             ) @@ Array.to_list env in
         let str = String.concat ~sep:"\n" @@ List.map ~f:(function
@@ -492,7 +493,15 @@ let compile_and_retrieve_benchmark_info
           | None   -> s, ""
           | Some p -> p in
         print_endline (key ^"="^ data);
-        Unix.putenv ~key ~data
+        if String.equal "PATH" key then
+          let new_paths = String.split data ~on:':' in
+          let old_paths = String.split (Unix.getenv_exn "PATH") ~on:':' in
+          let new_paths = String.concat ~sep:":" @@
+            List.filter ~f:(fun p -> List.exists old_paths ~f:(String.equal p)) new_paths in
+          Unix.putenv ~key:"PATH_EXTRA" ~data:new_paths
+        else
+          Unix.putenv ~key ~data
+
       ) env;
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
