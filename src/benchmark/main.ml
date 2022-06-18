@@ -165,6 +165,7 @@ module Cmd_worker = struct
         make_process info >>= function
         | Error e -> Pipe.write w (`Error e)
         | Ok (str, { stdout; stderr; sock_in; sock_out; wait; _ }) ->
+          Pipe.write w (`Stderr str) >>= fun () ->
           let pipes =
             [ Pipe.transfer ~f:(fun m -> `Stdout m) (Reader.pipe stdout) w
             ; Pipe.transfer ~f:(fun m -> `Stderr m) (Reader.pipe stderr) w ] in
@@ -491,11 +492,13 @@ let compile_and_retrieve_benchmark_info
         let key, data = match OpamStd.String.cut_at s '=' with
           | None   -> s, ""
           | Some p -> p in
+        print_endline (key ^"="^ data);
         if String.equal "PATH" key then
           let new_paths = String.split data ~on:':' in
           let old_paths = String.split (Unix.getenv_exn "PATH") ~on:':' in
           let new_paths = String.concat ~sep:":" @@
             List.filter ~f:(fun p -> List.exists old_paths ~f:(String.equal p)) new_paths in
+          print_endline ("PATH_EXTRA=" ^ new_paths);
           Unix.putenv ~key:"PATH_EXTRA" ~data:new_paths
         else
           Unix.putenv ~key ~data
