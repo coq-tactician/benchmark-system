@@ -135,11 +135,6 @@ module Cmd_worker = struct
         let exec =
           String.chop_suffix_exn exec ~suffix:("lib"/"coq-tactician"/"coqc.real") ^ "bin"/"coqc" in
         let args = bargs @ [exec] @ args in
-        let str = "(cd " ^ dir ^ " && " ^ String.concat ~sep:" " ("bwrap"::args) ^ ")" in
-        Process.run
-          ~working_dir:dir
-          ~prog:"chmod"
-          ~args:["+rw"; "-R"; dir] () >>=? fun _ ->
         let env =
           List.map ~f:(fun s ->
               match OpamStd.String.cut_at s '=' with
@@ -149,6 +144,14 @@ module Cmd_worker = struct
                   key, Some (value ^ ":" ^ Unix.getenv_exn "PATH")
                 else key, Some value
             ) @@ Array.to_list env in
+        let str = String.concat ~sep:"\n" @@ List.map ~f:(function
+            | (key, None) -> key ^ "=; export " ^ key ^ ";"
+            | (key, Some value) -> key ^ "=" ^ value ^ "; export " ^ key ^ ";") env in
+        let str = str ^ "\n(cd " ^ dir ^ " && " ^ String.concat ~sep:" " ("bwrap"::args) ^ ")" in
+        Process.run
+          ~working_dir:dir
+          ~prog:"chmod"
+          ~args:["+rw"; "-R"; dir] () >>=? fun _ ->
         Spawn_with_socket.create
           ~env:(`Override env)
           ~working_dir:dir
@@ -161,6 +164,7 @@ module Cmd_worker = struct
         make_process info >>= function
         | Error e -> Pipe.write w (`Error e)
         | Ok (str, { stdout; stderr; sock_in; sock_out; wait; _ }) ->
+          Pipe.write w (`Stderr str) >>= fun () ->
           let pipes =
             [ Pipe.transfer ~f:(fun m -> `Stdout m) (Reader.pipe stdout) w
             ; Pipe.transfer ~f:(fun m -> `Stderr m) (Reader.pipe stderr) w ] in
