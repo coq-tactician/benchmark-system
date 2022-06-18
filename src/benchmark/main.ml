@@ -146,7 +146,9 @@ module Cmd_worker = struct
               | None   -> s, None
               | Some (key, value) ->
                 if String.equal key "PATH" then
-                  key, Some (value ^ ":" ^ Unix.getenv_exn "PATH")
+                  let key, value = key, (value ^ ":" ^ Unix.getenv_exn "PATH") in
+                  print_endline value;
+                  key, Some value
                 else key, Some value
             ) @@ Array.to_list env in
         Spawn_with_socket.create
