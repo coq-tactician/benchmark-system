@@ -146,9 +146,7 @@ module Cmd_worker = struct
               | None   -> s, None
               | Some (key, value) ->
                 if String.equal key "PATH" then
-                  let key, value = key, (value ^ ":" ^ Unix.getenv_exn "PATH") in
-                  print_endline value;
-                  key, Some value
+                  key, Some (value ^ ":" ^ Unix.getenv_exn "PATH")
                 else key, Some value
             ) @@ Array.to_list env in
         Spawn_with_socket.create
@@ -489,6 +487,7 @@ let compile_and_retrieve_benchmark_info
         let key, data = match OpamStd.String.cut_at s '=' with
           | None   -> s, ""
           | Some p -> p in
+        print_endline (key ^"="^ data);
         Unix.putenv ~key ~data
       ) env;
     Build_worker.Connection.run conn
