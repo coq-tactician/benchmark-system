@@ -709,7 +709,8 @@ let alloc_benchers =
     ~abort ~error_writer
     ~bench_allocator
     ~job_starter
-    ~benchmark_commit ->
+    ~benchmark_commit
+    ~processor_err ->
     let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
     let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
     let error_if_not_aborted e =
@@ -719,7 +720,9 @@ let alloc_benchers =
        ~prog:"setsid"
        ~args:["-w"; bench_allocator; benchmark_commit]
        () >>=? fun p ->
-     let pipe = Reader.transfer (Process.stderr p) stderr in
+     let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr p) in
+     let pipe = [ Pipe.transfer_id perr1 stderr
+                ; Pipe.transfer_id perr2 processor_err ] in
      let p_stdout = Process.stdout p in
      Deferred.choose [ Deferred.choice (Reader.read_line p_stdout) (fun t -> `Allocated t)
                      ; Deferred.choice abort (fun () -> `Aborted) ] >>= function
@@ -755,7 +758,7 @@ let alloc_benchers =
        let stdin = Process.stdin p in
        Monitor.detach (Writer.monitor stdin);
        Writer.write stdin "done\n";
-       pipe >>= fun () ->
+       Deferred.List.all_unit pipe >>= fun () ->
        Reader.transfer (Process.stdout p) stdout >>= fun () ->
        collect_and_check_empty Process.collect_output_and_wait p >>= function
        | Ok () ->
@@ -766,7 +769,9 @@ let alloc_benchers =
        | Error (`Signal s) ->
          Deferred.Or_error.errorf "Alloc protocol error: Abnormal signal: %s" @@ Signal.to_string s) >>= function
     | Ok () -> Deferred.unit
-    | Error e -> Pipe.write error_writer e
+    | Error e ->
+      Pipe.write processor_err (Error.to_string_hum e) >>= fun () ->
+      Pipe.write error_writer e
 
 module ResourceManager : sig
   type ('size, 'taken, 'release) t
@@ -1206,7 +1211,8 @@ let main
          ~task_allocator
          ~abort ~error_writer
          ~bench_allocator ~job_starter
-         ~benchmark_commit in
+         ~benchmark_commit
+         ~processor_err in
      let request_allocate = ResourceManager.merge resources_requested_queue resources_total_queue in
      task_disseminator
        ~alloc_benchers
