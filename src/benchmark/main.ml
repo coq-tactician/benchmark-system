@@ -714,7 +714,6 @@ let alloc_benchers =
     ~benchmark_commit
     ~processor_err ->
     let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
-    let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
     let error_if_not_aborted e =
       if Deferred.is_determined abort then Deferred.Or_error.ok_unit else
         Deferred.Or_error.fail e in
@@ -1436,19 +1435,23 @@ Examples:
 
 (* TODO: Use brwap to sandbox to the scratch directory *)
 let () =
-  (match Core.Unix.fork () with
-   | `In_the_child ->
-     ExtUnix.Specific.setpgid 0 0;
-     Rpc_parallel.start_app command
-   | `In_the_parent child ->
-     let handler s =
-       match Core.Signal.send s (`Pid child) with
-        | `Ok -> ()
-        | `No_such_process -> () in
-     let signals_to_forward = [Core.Signal.int; Core.Signal.hup; Core.Signal.term; Core.Signal.quit] in
-     List.iter ~f:(fun s -> Core.Signal.Expert.handle s handler) signals_to_forward;
-     match Core.Unix.waitpid child with
-     | Ok () -> ()
-     | Error (`Exit_non_zero i) -> Core.exit i
-     | Error (`Signal _) -> Core.exit 1 (* TODO: Proper way of handling this? *)
-  );
+  match Rpc_parallel__.Utils.whoami () with
+  | `Master ->
+    (match Core.Unix.fork () with
+     | `In_the_child ->
+       ExtUnix.Specific.setpgid 0 0;
+       Rpc_parallel.start_app command
+     | `In_the_parent child ->
+       let handler s =
+         match Core.Signal.send s (`Pid child) with
+         | `Ok -> ()
+         | `No_such_process -> () in
+       let signals_to_forward = [Core.Signal.int; Core.Signal.hup; Core.Signal.term; Core.Signal.quit] in
+       List.iter ~f:(fun s -> Core.Signal.Expert.handle s handler) signals_to_forward;
+       match Core.Unix.waitpid child with
+       | Ok () -> ()
+       | Error (`Exit_non_zero i) -> Core.exit i
+       | Error (`Signal _) -> Core.exit 1 (* TODO: Proper way of handling this? *)
+    );
+  | `Worker ->
+    Rpc_parallel.start_app command
