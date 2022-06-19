@@ -61,6 +61,12 @@ end = struct
   let count c = !c
 end
 
+let collect_and_check_empty collect t =
+  collect t >>| fun Process.Output.{ stdout; stderr; exit_status } ->
+  assert (String.is_empty stdout);
+  assert (String.is_empty stderr);
+  exit_status
+
 module Cmd_worker = struct
   module T = struct
 
@@ -164,7 +170,7 @@ module Cmd_worker = struct
         Deferred.return @@ Pipe.create_reader ~close_on_exception:false @@ fun w ->
         make_process info >>= function
         | Error e -> Pipe.write w (`Error e)
-        | Ok (str, { stdout; stderr; sock_in; sock_out; wait; _ }) ->
+        | Ok (str, ({ stdout; stderr; sock_in; sock_out; _ } as proc)) ->
           let pipes =
             [ Pipe.transfer ~f:(fun m -> `Stdout m) (Reader.pipe stdout) w
             ; Pipe.transfer ~f:(fun m -> `Stderr m) (Reader.pipe stderr) w ] in
@@ -182,7 +188,7 @@ module Cmd_worker = struct
             | `Ok ((Found _) as msg) -> Pipe.write w (`Result msg) >>= fun () -> loop () in
           loop () >>= fun () ->
           Deferred.all_unit pipes >>= fun () ->
-          force wait >>= function
+          collect_and_check_empty Spawn_with_socket.collect_output_and_wait proc >>= function
           | Ok _ -> Deferred.unit
           | Error (`Exit_non_zero i) ->
             Pipe.write w (`Error (Error.createf "Abnormal exit code for coqc: %d\n Invocation:\n%s" i str))
@@ -300,7 +306,7 @@ let run_processor
    with_job ~prefix ~job_name ~hostname loop) >>= fun res ->
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
-   (Process.wait process >>= function
+   (collect_and_check_empty Process.collect_output_and_wait process >>= function
      | Ok () -> Deferred.unit
      | Error (`Exit_non_zero i) ->
        let err = "Abnormal exit code for command worker: " ^ job_name ^ " with prefix " ^
@@ -390,7 +396,8 @@ module Build_worker = struct
              Process.create ~working_dir:dir ~prog:prereq_file ~args:[] () >>=? fun p ->
              let pipes = [ Reader.transfer (Process.stderr p) stderr
                          ; Reader.transfer (Process.stdout p) stdout ] in
-             (Deferred.all_unit pipes >>= fun () -> Process.wait p >>= function
+             (Deferred.all_unit pipes >>= fun () ->
+              collect_and_check_empty Process.collect_output_and_wait p >>= function
                | Ok () -> Deferred.Or_error.return ()
                | Error _ -> Deferred.Or_error.errorf "Prerequisites file error")) >>=? fun () ->
          let update_env_file = Filename.concat dir "update-env" in
@@ -460,10 +467,10 @@ let compile_and_retrieve_benchmark_info
   match line with
   | `Aborted ->
     Signal.send_i Signal.int (`Group (Process.pid p));
-    Process.wait p >>| fun _ -> Or_error.errorf "Aborted before initial compilation could start"
+    Process.collect_output_and_wait p >>| fun _ -> Or_error.errorf "Aborted before initial compilation could start"
   | `Allocated `Eof ->
     Signal.send_i Signal.int (`Group (Process.pid p));
-    Process.wait p >>| fun _ -> Or_error.errorf "Compile alloc protocol error: Unexpected eof"
+    Process.collect_output_and_wait p >>| fun _ -> Or_error.errorf "Compile alloc protocol error: Unexpected eof"
   | `Allocated `Ok prefix ->
     Build_worker.spawn_in_foreground
       ~how:(remote_how prefix)
@@ -519,7 +526,7 @@ let compile_and_retrieve_benchmark_info
       remove_job ~prefix ~job_name ~hostname >>= fun () ->
       Build_worker.Connection.close conn >>= fun () ->
       Deferred.all_unit pipes >>= fun () ->
-      Process.wait process >>= (function
+      collect_and_check_empty Process.collect_output_and_wait process >>= (function
           | Ok () -> Deferred.unit
           | Error (`Exit_non_zero i) ->
             let err = "Abnormal exit code for build worker on host " ^ hostname ^ ". Code: " ^ string_of_int i in
@@ -534,7 +541,8 @@ let compile_and_retrieve_benchmark_info
       Monitor.detach (Writer.monitor pstdin);
       Writer.write pstdin "done\n";
       pipe >>= fun () ->
-      Process.wait p >>= function
+      Reader.transfer (Process.stdout p) stdout >>= fun () ->
+      collect_and_check_empty Process.collect_output_and_wait p >>= function
       | Ok () -> Deferred.unit
       | Error (`Exit_non_zero i) ->
         Pipe.write error_writer @@ Error.createf "Compile alloc protocol error: Abnormal exit code: %d" i
@@ -703,6 +711,7 @@ let alloc_benchers =
     ~job_starter
     ~benchmark_commit ->
     let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
+    let stdout = Writer.pipe @@ Lazy.force Writer.stdout in
     let error_if_not_aborted e =
       if Deferred.is_determined abort then Deferred.Or_error.ok_unit else
         Deferred.Or_error.fail e in
@@ -711,14 +720,14 @@ let alloc_benchers =
        ~args:["-w"; bench_allocator; benchmark_commit]
        () >>=? fun p ->
      let pipe = Reader.transfer (Process.stderr p) stderr in
-     let stdout = Process.stdout p in
-     Deferred.choose [ Deferred.choice (Reader.read_line stdout) (fun t -> `Allocated t)
+     let p_stdout = Process.stdout p in
+     Deferred.choose [ Deferred.choice (Reader.read_line p_stdout) (fun t -> `Allocated t)
                      ; Deferred.choice abort (fun () -> `Aborted) ] >>= function
      | `Aborted ->
        relinquish_alloc_token ();
        relinquish_running_token ();
        Signal.send_i Signal.int (`Group (Process.pid p));
-       Process.wait p >>| fun _ -> Or_error.return ()
+       Process.collect_output_and_wait p >>| fun _ -> Or_error.return ()
      | `Allocated `Eof ->
        relinquish_alloc_token ();
        relinquish_running_token ();
@@ -729,7 +738,7 @@ let alloc_benchers =
         | None -> Deferred.Or_error.errorf "Alloc protocol error: Int expected, got %s" time
         | Some time -> Deferred.Or_error.return time) >>=? fun time ->
        let rec loop cont =
-         Reader.read_line stdout >>= function
+         Reader.read_line p_stdout >>= function
          | `Eof -> error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
          | `Ok prefix ->
            if String.equal "done" prefix then
@@ -747,7 +756,8 @@ let alloc_benchers =
        Monitor.detach (Writer.monitor stdin);
        Writer.write stdin "done\n";
        pipe >>= fun () ->
-       Process.wait p >>= function
+       Reader.transfer (Process.stdout p) stdout >>= fun () ->
+       collect_and_check_empty Process.collect_output_and_wait p >>= function
        | Ok () ->
          relinquish_running_token ();
          Deferred.Or_error.ok_unit
