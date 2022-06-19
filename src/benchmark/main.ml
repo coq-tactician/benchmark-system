@@ -172,14 +172,14 @@ module Cmd_worker = struct
           let rec loop () =
             Pipe.read messages >>= function
             | `Eof -> Deferred.unit
-            | `Ok (Should lemma) ->
-              Pipe.write w (`Result (Should lemma)) >>= fun () ->
+            | `Ok ((Should _) as msg) ->
+              Pipe.write w (`Result msg) >>= fun () ->
               Pipe.read (fst conn_state) >>= (function
                   | `Eof -> assert false
                   | `Ok res ->
                     let res = Marshal.to_bytes (res : bench_response) [] in
                     Writer.write_bytes sock_in res; loop ())
-            | `Ok msg -> Pipe.write w (`Result msg) >>= fun () -> loop () in
+            | `Ok ((Found _) as msg) -> Pipe.write w (`Result msg) >>= fun () -> loop () in
           loop () >>= fun () ->
           Deferred.all_unit pipes >>= fun () ->
           force wait >>= function
@@ -289,7 +289,11 @@ let run_processor
        (match final with
         | None -> Deferred.Or_error.return processed_lemmas
         | Some lemma ->
-          Pipe.write reporter { lemma; result = None } >>| fun () -> Ok (lemma::processed_lemmas))
+          (if Deferred.is_determined error_occurred then
+             Deferred.unit
+           else
+             Pipe.write reporter { lemma; result = None }) >>| fun () ->
+          Ok (lemma::processed_lemmas))
        >>=? fun _processed_lemmas ->
        relinquish ();
        loop () in
