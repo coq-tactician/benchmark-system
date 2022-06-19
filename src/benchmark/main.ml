@@ -239,6 +239,8 @@ let run_processor
      { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
+   print_endline ("Processor stdout fid " ^ Fd.to_string @@ Reader.fd(Process.stdout process));
+   print_endline ("Processor stderr fid " ^ Fd.to_string @@ Reader.fd(Process.stderr process));
    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
    let pipes =
      [ Reader.transfer (Process.stdout process) processor_out
@@ -303,6 +305,10 @@ let run_processor
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
    Writer.close (Process.stdin process) >>= fun () ->
+   if not (Reader.is_closed (Process.stdout process)) then
+     print_endline "processor stdout was not closed";
+   if not (Reader.is_closed (Process.stderr process)) then
+     print_endline "processor stderr was not closed";
    (Process.wait process >>= function
      | Ok () -> Deferred.unit
      | Error (`Exit_non_zero i) ->
