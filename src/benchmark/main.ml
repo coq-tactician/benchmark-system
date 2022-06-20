@@ -596,12 +596,12 @@ let prepare_data_dir ~benchmark_data ~benchmark_commit ~lemma_time =
       | `Yes -> Deferred.unit) >>| fun () ->
   data_dir
 
-let with_log_writer file f =
-  Writer.with_file file ~f:(fun w ->
+let with_log_writer ~append file f =
+  Writer.with_file ~append file ~f:(fun w ->
       f w)
 
-let with_log_pipe file f =
-  Writer.with_file file ~f:(fun w ->
+let with_log_pipe ~append file f =
+  Writer.with_file ~append file ~f:(fun w ->
     let w = Writer.pipe w in
     f w >>= fun res ->
     Pipe.upstream_flushed w >>| fun _ -> res)
@@ -997,9 +997,15 @@ let filter_lemmas lemma_filter info_stream =
    | Some (`Include file) ->
      mk_lemma_set file >>| fun lemmas ->
      fun lemma -> String.Set.mem lemmas lemma
+   | Some (`Include_list lemmas) ->
+     let lemmas = String.Set.of_list lemmas in
+     return (fun lemma -> String.Set.mem lemmas lemma)
    | Some (`Exclude file) ->
      mk_lemma_set file >>| fun lemmas ->
      fun lemma -> not @@ String.Set.mem lemmas lemma
+   | Some (`Exclude_list lemmas) ->
+     let lemmas = String.Set.of_list lemmas in
+     return (fun lemma -> not @@ String.Set.mem lemmas lemma)
    | Some (`IncludeRegexp regexp) ->
      let regexp = Str.regexp regexp in
      return (fun lemma -> Str.string_match regexp lemma 0)
@@ -1023,6 +1029,7 @@ let main
     ~lemma_time
     ~packages
     ~shared_filesystem
+    ~resume
   =
   let (/) = Filename.concat in
   Process.run
@@ -1032,16 +1039,30 @@ let main
   let stdout = Lazy.force Writer.stdout in
   Writer.write stdout out;
   prepare_data_dir ~benchmark_data ~benchmark_commit ~lemma_time >>= fun data_dir ->
-  with_log_writer (data_dir/"error.log") @@ fun error_log ->
+  with_log_writer ~append:resume (data_dir/"error.log") @@ fun error_log ->
   let error_writer, error_occurred = error_handler error_log in
-  (with_log_pipe (data_dir/"opam-out.log") @@ fun opam_out ->
-   with_log_pipe (data_dir/"opam-err.log") @@ fun opam_err ->
-   with_log_pipe (data_dir/"opam-timings.log") @@ fun opam_timings ->
-   with_log_pipe (data_dir/"coq-out.log") @@ fun coq_out ->
-   with_log_pipe (data_dir/"coq-err.log") @@ fun coq_err ->
-   with_log_pipe (data_dir/"processor-out.log") @@ fun processor_out ->
-   with_log_pipe (data_dir/"processor-err.log") @@ fun processor_err ->
-   with_log_writer (data_dir/"combined.bench") @@ fun bench_log ->
+  (if resume then
+     Sys.file_exists (data_dir/"combined.bench") >>= function
+     | `No | `Unknown ->
+       Pipe.write error_writer (Error.of_string "No existing benchmark could be found to resume") >>| fun () ->
+       None
+     | `Yes ->
+       Reader.file_lines (data_dir/"combined.bench") >>= fun lines ->
+       let already_done = List.filter_map ~f:(fun line -> List.hd @@ String.split ~on:'\t' line) lines in
+       (if List.is_empty already_done then
+         Pipe.write error_writer (Error.of_string "The previous benchmark was empty, nothing to resume")
+         else Deferred.unit) >>| fun () ->
+       Some (`Exclude_list already_done)
+   else
+     Deferred.return None) >>= fun resume_filter ->
+  (with_log_pipe ~append:resume (data_dir/"opam-out.log") @@ fun opam_out ->
+   with_log_pipe ~append:resume (data_dir/"opam-err.log") @@ fun opam_err ->
+   with_log_pipe ~append:resume (data_dir/"opam-timings.log") @@ fun opam_timings ->
+   with_log_pipe ~append:resume (data_dir/"coq-out.log") @@ fun coq_out ->
+   with_log_pipe ~append:resume (data_dir/"coq-err.log") @@ fun coq_err ->
+   with_log_pipe ~append:resume (data_dir/"processor-out.log") @@ fun processor_out ->
+   with_log_pipe ~append:resume (data_dir/"processor-err.log") @@ fun processor_err ->
+   with_log_writer ~append:resume (data_dir/"combined.bench") @@ fun bench_log ->
    write_injections ~data_dir ~injections_extra >>= fun () ->
    write_bench_params ~scratch >>= fun extra_args ->
 
@@ -1191,6 +1212,7 @@ let main
      let info_stream = Pipe.map info_stream ~f:(fun ({ args; _ } as info) ->
          { info with args = Array.append args extra_args }) in
      filter_lemmas lemma_filter info_stream >>= fun info_stream ->
+     filter_lemmas resume_filter info_stream >>= fun info_stream ->
      let info_stream, reporter_stream = Pipe.fork ~pushback_uses:`Fast_consumer_only info_stream in
      let resources_requested_queue = ResourceManager.make_resource `Requested max_requests in
      let resources_total_queue = ResourceManager.make_resource' `Total max_running in
@@ -1403,6 +1425,9 @@ Examples:
      and+ shared_filesystem = flag "shared-filesystem" no_arg
          ~doc:"Assume that the scratch directory is hosted on a shared filesystem. No copying of files between hosts \
                is performed."
+     and+ resume = flag "resume" no_arg
+         ~doc:"Look up the previous (partial) benchmark with the same parameters as specified in the current \
+               invocation, and finish that benchmark appending old the existing log files."
      and+ packages = anon (non_empty_sequence_as_list ("package" %: string))
      in fun () ->
        enable_debug := debug;
@@ -1431,7 +1456,7 @@ Examples:
            ~scratch ~delay_benchmark
            ~bench_allocator ~compile_allocator ~max_requests ~max_running
            ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~lemma_time ~packages
-           ~shared_filesystem)
+           ~shared_filesystem ~resume)
 
 (* TODO: Use brwap to sandbox to the scratch directory *)
 let () =
