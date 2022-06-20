@@ -194,6 +194,10 @@ tactician-benchmark PACKAGE [PACKAGE ...]
                                  WARNING: This number is infinite by default,
                                  which is likely not appropriate for local
                                  resources.
+  [-resume]                      Look up the previous (partial) benchmark with
+                                 the same parameters as specified in the current
+                                 invocation, and finish that benchmark appending
+                                 old the existing log files.
   [-shared-filesystem]           Assume that the scratch directory is hosted on
                                  a shared filesystem. No copying of files
                                  between hosts is performed.
