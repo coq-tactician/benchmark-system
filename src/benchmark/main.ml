@@ -239,11 +239,9 @@ let run_processor
      { name = job_name }
      ~connection_state_init_arg:()
    >>=? fun (conn, process) ->
-   print_endline ("Processor stdout fid " ^ Fd.to_string @@ Reader.fd(Process.stdout process));
-   print_endline ("Processor stderr fid " ^ Fd.to_string @@ Reader.fd(Process.stderr process));
    let perr1, perr2 = Pipe.fork ~pushback_uses:`Both_consumers (Reader.pipe @@ Process.stderr process) in
    let pipes =
-     [ Reader.transfer (Process.stdout process) processor_out
+     [ Pipe.transfer_id (Reader.pipe @@ Process.stdout process) processor_out
      ; Pipe.transfer_id perr1 processor_err
      ; Pipe.transfer_id perr2 stderr ] in
    don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn);
@@ -305,10 +303,6 @@ let run_processor
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
    Writer.close (Process.stdin process) >>= fun () ->
-   if not (Reader.is_closed (Process.stdout process)) then
-     print_endline "processor stdout was not closed";
-   if not (Reader.is_closed (Process.stderr process)) then
-     print_endline "processor stderr was not closed";
    (Process.wait process >>= function
      | Ok () -> Deferred.unit
      | Error (`Exit_non_zero i) ->
@@ -397,8 +391,8 @@ module Build_worker = struct
            | `No | `Unknown -> Deferred.Or_error.return ()
            | `Yes ->
              Process.create ~working_dir:dir ~prog:prereq_file ~args:[] () >>=? fun p ->
-             let pipes = [ Reader.transfer (Process.stderr p) stderr
-                         ; Reader.transfer (Process.stdout p) stdout ] in
+             let pipes = [ Pipe.transfer_id (Reader.pipe @@ Process.stderr p) stderr
+                         ; Pipe.transfer_id (Reader.pipe @@ Process.stdout p) stdout ] in
              (Deferred.all_unit pipes >>= fun () ->
               Writer.close (Process.stdin p) >>= fun () ->
               Process.wait p >>= function
@@ -459,7 +453,7 @@ let compile_and_retrieve_benchmark_info
     ~prog:"setsid"
     ~args:["-w"; compile_allocator; benchmark_commit]
     () >>=? fun p ->
-  let pipe = Reader.transfer (Process.stderr p) stderr in
+  let pipe = Pipe.transfer_id (Reader.pipe @@ Process.stderr p) stderr in
   let pstdout = Process.stdout p in
   let stop_clock = Ivar.create () in
   Clock_ns.every ~start:(Clock_ns.after Time_ns.Span.second)
@@ -548,7 +542,7 @@ let compile_and_retrieve_benchmark_info
       Monitor.detach (Writer.monitor pstdin);
       Writer.write pstdin "done\n";
       pipe >>= fun () ->
-      Reader.transfer (Process.stdout p) stdout >>= fun () ->
+      Pipe.transfer_id (Reader.pipe @@ Process.stdout p) stdout >>= fun () ->
       Writer.close (Process.stdin p) >>= fun () ->
       Process.wait p >>= function
       | Ok () -> Deferred.unit
