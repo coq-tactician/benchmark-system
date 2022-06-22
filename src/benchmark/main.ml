@@ -379,6 +379,9 @@ module Build_worker = struct
           | `No | `Unknown -> Deferred.Or_error.return ()
           | `Yes -> Process.run ~prog:"rm" ~args:["-rf"; dir] () >>|? fun _ -> ()) >>=? fun () ->
          Unix.mkdir dir >>= fun () ->
+         let repo = String.strip repo in
+         let repo = if String.is_prefix ~prefix:"git+http" repo then
+             String.chop_prefix_exn ~prefix:"git+" repo else repo in
          let cmds =
            [ "git", ["init"]
            ; "git", ["remote"; "add"; "origin"; repo]
