@@ -597,6 +597,7 @@ let prepare_data_dir ~benchmark_data ~benchmark_commit ~lemma_time =
   Sys.file_exists data_dir >>= (function
       | `Unknown | `No -> Unix.mkdir data_dir
       | `Yes -> Deferred.unit) >>| fun () ->
+  print_endline ("Data directory:\n"^data_dir);
   data_dir
 
 let with_log_writer ~append file f =
@@ -697,6 +698,10 @@ let commit
     ~prog:"git"
     ~args:["push"] () >>=? fun out ->
   Writer.write stdout out;
+  Writer.write stdout ("Data directory:\n"^data_dir);
+  let dir = List.last_exn (Filename.parts data_dir) in
+  Writer.write stdout ("Online data location:\nhttps://github.com/coq-tactician/benchmark-data/tree/master/"^
+                       benchmark_commit^"/"^dir);
   Writer.flushed stdout >>= fun () ->
   Deferred.Or_error.ok_unit) >>= function
   | Ok () -> Deferred.unit
