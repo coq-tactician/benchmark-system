@@ -698,10 +698,10 @@ let commit
     ~prog:"git"
     ~args:["push"] () >>=? fun out ->
   Writer.write stdout out;
-  Writer.write stdout ("Data directory:\n"^data_dir);
+  Writer.write stdout ("Data directory:\n"^data_dir^"\n");
   let dir = List.last_exn (Filename.parts data_dir) in
   Writer.write stdout ("Online data location:\nhttps://github.com/coq-tactician/benchmark-data/tree/master/"^
-                       benchmark_commit^"/"^dir);
+                       benchmark_commit^"/"^dir^"/\n");
   Writer.flushed stdout >>= fun () ->
   Deferred.Or_error.ok_unit) >>= function
   | Ok () -> Deferred.unit
