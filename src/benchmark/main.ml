@@ -700,6 +700,7 @@ let commit
   Writer.write stdout out;
   Writer.write stdout ("Data directory:\n"^data_dir^"\n");
   let dir = List.last_exn (Filename.parts data_dir) in
+  (* TODO: In the future, we should not hardcode this link *)
   Writer.write stdout ("Online data location:\nhttps://github.com/coq-tactician/benchmark-data/tree/master/"^
                        benchmark_commit^"/"^dir^"/\n");
   Writer.flushed stdout >>= fun () ->
