@@ -6,7 +6,7 @@ authors: ["Lasse Blaauwbroek <lasse@blaauwbroek.eu>"]
 homepage: "https://coq-tactician.github.io"
 bug-reports: "https://github.com/coq-tactician/benchmark-system/issues"
 depends: [
-  "ocaml" {>= "4.08"}
+  "ocaml" {>= "4.12.0"}
   "dune" {>= "2.8"}
   "dune-site" {>= "2.9.1"}
   "opam-client" {>= "2.1.0"}

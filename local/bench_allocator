@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Number of minutes a task is allowed to run; for a local task this should not be limited.
+echo 999999
+CPUS=1
+for i in $(seq $CPUS); do
+    # For allocated resources, this is the command line invocation to run a program within those resources.
+    # For local allocation, nothing needs to happen.
+    echo ""
+done
+# Signals the end of the allocation protocol.
+echo "done"

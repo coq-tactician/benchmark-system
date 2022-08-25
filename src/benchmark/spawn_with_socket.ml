@@ -218,3 +218,13 @@ let create
       }
     in
     Ok t
+
+let collect_output_and_wait t =
+  let stdout = Reader.contents t.stdout in
+  let stderr = Reader.contents t.stderr in
+  let%bind () = Reader.close t.sock_out in
+  let%bind () = Writer.close t.sock_in ~force_close:(Deferred.never ()) in
+  let%bind exit_status = force t.wait in
+  let%bind stdout = stdout in
+  let%bind stderr = stderr in
+  return { Process.Output.stdout; stderr; exit_status }

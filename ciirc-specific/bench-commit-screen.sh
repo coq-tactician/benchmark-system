@@ -10,6 +10,6 @@ fi
 
 NAME="tact$RANDOM"
 
-screen -L -dm -S "$NAME" /home/blaaulas/tactician/benchmark-system/srun-tactician-benchmark.sh "$NAME" "$@"
+screen -L -dm -S "$NAME" /home/blaaulas/tactician/benchmark-system/ciirc-specific/srun-tactician-benchmark.sh "$NAME" "$@"
 
 echo $NAME
