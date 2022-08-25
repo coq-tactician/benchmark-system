@@ -12,7 +12,7 @@ let main () =
       ~packages:["coq-tactician-stdlib"]
       ~injections_extra:[]
   >>= fun (r, cont) ->
-  Pipe.iter r ~f:(fun { exec; args; env; dir; lemmas } ->
+  Pipe.iter r ~f:(fun { exec; args; env; dir; lemmas; _ } ->
       print_endline exec;
       print_endline dir;
       Array.iter args ~f:print_endline;
