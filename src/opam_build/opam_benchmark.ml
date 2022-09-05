@@ -112,7 +112,7 @@ let build_switch_for_benchmark
           ~requested:(OpamPackage.Name.Set.of_list @@ List.map fst every_root_package)
           request in
       match solution with
-      | OpamTypes.Success s -> OpamSolver.new_packages s in
+      | OpamTypes.Success s -> OpamSolver.new_packages s
       | OpamTypes.Conflicts cs ->
         OpamConsole.errmsg "%s" @@
         OpamCudf.string_of_explanations (OpamSwitchState.unavailable_reason st) @@
