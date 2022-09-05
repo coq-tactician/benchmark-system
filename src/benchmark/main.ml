@@ -1141,16 +1141,25 @@ let main
                               " at time " ^ string_of_int t ^ "/" ^
                               string_of_int (Counter.count last_abstract_time) ^ "\nInvocation: " ^ prog ^ " " ^
                               String.concat ~sep:" " args);
-                let prsync = Process.create ~prog ~args () >>=? fun p ->
-                  Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
-                  Process.collect_stdout_and_wait p in
+                let prsync = Process.create ~prog ~args () >>= fun p ->
+                  match p with
+                  | Error e ->
+                    if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
+                  | Ok p ->
+                    Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
+                    Process.collect_output_and_wait p >>= fun Process.Output.{ stderr; exit_status; _ } ->
+                    match exit_status with
+                    | Ok () -> return ()
+                    | Error (`Exit_non_zero 24) ->
+                      Pipe.write processor_err stderr
+                    | Error _ ->
+                      if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer @@
+                        Error.createf "Rsync failed: %s" stderr
+                in
                 data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
                     | None -> assert false
                     | Some m -> prsync >>= fun _ -> m);
-                prsync >>= function
-                | Error e ->
-                  if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
-                | Ok _out -> Deferred.unit
+                prsync
               end
              else Deferred.unit) >>| fun () ->
             host_abstract_time := synced_time)
