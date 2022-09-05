@@ -28,9 +28,9 @@ let calculate ~root_dir () =
     ~best_effort:true
     ~solver:(lazy (OpamCudfSolver.solver_of_string "aspcud --solver-option=--opt-strategy=bb,hier %{input}% %{output}% %{criteria}%"))
     ~solver_timeout:None
-    (* ~solver_preferences_default:(lazy ( *)
-    (*     let module S = OpamCudfSolver.Aspcud in *)
-    (*     Some S.default_criteria.crit_default)) *)
+    ~solver_preferences_default:(lazy (
+        let module S = OpamCudfSolver.Aspcud in
+        Some S.default_criteria.crit_default))
     ~solver_preferences_upgrade:(lazy (
         let module S = OpamCudfSolver.Aspcud in
         Some S.default_criteria.crit_upgrade))
