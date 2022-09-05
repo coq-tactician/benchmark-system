@@ -1,3 +1,24 @@
+
+let excluded_names =
+  ["coq-tactician"; "coq-tactician-stdlib"; "coq-tactician-dummy"; "coq-tactician-reinforce" (* part of Tactician *)
+  ; "coq-gaia" (* has been split into sub-packages *)
+  ; "coq-hierarchy-builder-shim" (* empty shim that conflicts with original *)
+  ; "coq-compcert-64"; "coq-vst-64" (* these are old, coq-compcert and coq-vst are now 64b, while coq-compcert-32 and coq-vst-32 are 32b *)
+  ; "gappa" (* renamed to coq-gappa *)
+  ; "coq-engine-bench"; "coq-engine-bench-lite"; "coq-performance-tests"; "coq-performance-tests-lite"
+  (* benchmarks *)
+  ; "coq-fiat-crypto-legacy"; "coq-fiat-crypto-legacy-extra"; "coq-fiat-core"; "coq-fiat-crypto-with-bedrock"; "coq-fiat-parsers"
+    (* seems to all be part of coq-fiat-crypto *)
+  ; "coq-flocq3" (* legacy package *)
+  ; "coq-rewriter-perf-Fast"; "coq-rewriter-perf-Medium"; "coq-rewriter-perf-Slow"; "coq-rewriter-perf-SuperFast"; "coq-rewriter-perf-VerySlow"
+     (* Some benchmark *)
+  ; "menhirLib"; "menhirSdk"; "menhir" (* coq-menhirlib should cover tihs *)
+  ; "coq-serapi" (* not a Coq development *)]
+
+let exclude_versions =
+  [ "coq-albert", "dev"; "coq-formal-topology", "dev"; "coq-sf-plf", "dev" (* too old and unmaintained *)
+  ; "coq-fiat-crypto", "0.0.13"; "coq-tree-calculus", "1.0.0" (* currently broken *) ]
+
 let remove_create_switch gt rt c relax =
   let switch = OpamSwitch.of_string ("calculation" ^ string_of_int c) in
   let gt =
@@ -53,22 +74,17 @@ let calculate ~root_dir () =
       (fun p -> not @@ OpamPackage.Set.exists
           (fun p2 -> OpamPackage.Name.equal (OpamPackage.name p) (OpamPackage.name p2)) pkgs) dev_pkgs in
   (* let st = OpamSwitchState.load_virtual ?repos_list:(Some repos) gt rt in *)
+  let excluded_versions = OpamPackage.Set.of_list @@
+    List.map (fun (n, v) -> OpamPackage.create (OpamPackage.Name.of_string n) (OpamPackage.Version.of_string v))
+      exclude_versions in
+  let pkgs = OpamPackage.Set.filter
+      (fun p -> not @@ OpamPackage.Set.mem p excluded_versions) pkgs in
   let pkgs = OpamPackage.Set.filter
       (fun p -> OpamPackage.equal p (OpamPackage.max_version pkgs @@ OpamPackage.name p)) pkgs in
+  let excluded_names = OpamPackage.Name.Set.of_list @@
+    List.map OpamPackage.Name.of_string excluded_names in
   let pkgs = OpamPackage.Set.filter
-      (fun p -> not @@ OpamPackage.Name.Set.mem (OpamPackage.name p) @@ OpamPackage.Name.Set.of_list @@
-        List.map OpamPackage.Name.of_string
-          ["coq-tactician"; "coq-tactician-stdlib"; "coq-tactician-dummy"; "coq-tactician-reinforce";
-           "coq-gaia" (* has been split *);
-           "coq-hierarchy-builder-shim" (* empty shim that conflicts with original *);
-           "coq-compcert-64"; "coq-vst-64" (* these are old, coq-compcert is now 64b *);
-           "gappa" (* renamed to coq-gappa *);
-           "coq-engine-bench"; "coq-engine-bench-lite"; "coq-performance-tests"; "coq-performance-tests-lite" (* benchmarks *);
-           "coq-fiat-crypto-legacy"; "coq-fiat-crypto-legacy-extra"; "coq-fiat-core"; "coq-fiat-crypto-with-bedrock"; "coq-fiat-parsers"; (* seems to all be part of coq-fiat-crypto *)
-          "coq-flocq3"; (* legacy package *)
-           "coq-rewriter-perf-Fast"; "coq-rewriter-perf-Medium"; "coq-rewriter-perf-Slow"; "coq-rewriter-perf-SuperFast"; "coq-rewriter-perf-VerySlow" (* Some benchmark *);
-          "menhirLib"; "menhirSdk"; "menhir" (* coq-menhirlib should cover tihs *);
-          "coq-albert" (* too old *)]) pkgs in
+      (fun p -> not @@ OpamPackage.Name.Set.mem (OpamPackage.name p) excluded_names) pkgs in
   print_endline "\n";
   OpamPackage.Set.iter (fun p -> print_string @@ (OpamPackage.to_string p ^ " ")) pkgs;
   print_endline "\n";
