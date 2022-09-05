@@ -7,12 +7,14 @@ let repos =
 
 let tactician_package = OpamPackage.Name.of_string "coq-tactician"
 let tactician_stdlib_package = OpamPackage.Name.of_string "coq-tactician-stdlib"
+let coq_package = OpamPackage.Name.of_string "coq"
 
 let opam_init
     ~root_dir
     () =
   OpamClientConfig.opam_init
     ~root_dir
+    (* ~fake:true *)
     ~yes:(Some true)
     ~no_env_notice:true
     ~keep_build_dir:true
@@ -46,15 +48,18 @@ let inject ~gt ~st =
   let st = config_add_remove gt ?st "pre-build-commands" pre_build_command in
   Option.get st
 
-let enable_bench ~st ~port ~injections_extra =
+let get_bench_dir ~st =
   let nv = OpamSwitchState.get_package st tactician_package in
   let opam = OpamSwitchState.opam st nv in
   let env = OpamPackageVar.resolve ~opam st in
   let share_var = OpamVariable.(Full.create tactician_package (of_string "share")) in
   let share = OpamFilter.ident_string env (OpamFilter.ident_of_var share_var) in
   let (/) = Filename.concat in
+  share/"plugins"/"zzz-benchmark"
 
-  let bench_dir = share/"plugins"/"zzz-benchmark" in
+let enable_bench ~st ~port ~injections_extra =
+  let (/) = Filename.concat in
+  let bench_dir = get_bench_dir ~st in
   if not (Sys.file_exists bench_dir) then
     Sys.mkdir bench_dir 0o755;
 
@@ -72,6 +77,13 @@ let enable_bench ~st ~port ~injections_extra =
   OpamFilename.write (OpamFilename.of_string injection_file) injection_contents;
   injection_flags
 
+let disable_bench ~st =
+  let (/) = Filename.concat in
+  let bench_dir = get_bench_dir ~st in
+  let injection_file = bench_dir/"injection-flags" in
+  if Sys.file_exists injection_file then
+    Unix.unlink injection_file
+
 let timing () =
   let open Core in
   let before = Time_ns.now () in
@@ -85,38 +97,88 @@ let build_switch_for_benchmark
   let packages = List.map OpamFormula.atom_of_string packages in
   let do_actions st =
     let target_install_time = timing () in
-    let name = OpamPackage.Name.of_string benchmark_target in
+    let target_name = OpamPackage.Name.of_string benchmark_target in
     let url = OpamUrl.of_string benchmark_url in
-    let st = OpamPinCommand.source_pin st name (Some url) in
-    let st = OpamClient.install st [tactician_package, None; name, None] in
-    let target_install_time = target_install_time () in
+    let st = OpamPinCommand.source_pin st target_name (Some url) in
 
-    let st = inject ~gt ~st in
+    (* Stage 0: Calculate sets of packages that we need to install *)
 
-    let deps_install_time = timing () in
+    let every_root_package = packages @ [target_name, None; tactician_package, None] in
+    let every_package =
+      let request = OpamSolver.request ~install:every_root_package () in
+      let solution =
+        OpamSolution.resolve st Install
+          ~orphans:OpamPackage.Set.empty
+          ~requested:(OpamPackage.Name.Set.of_list @@ List.map fst every_root_package)
+          request in
+      match solution with
+      | OpamTypes.Success s -> OpamSolver.new_packages s in
+      | OpamTypes.Conflicts cs ->
+        OpamConsole.errmsg "%s" @@
+        OpamCudf.string_of_explanations (OpamSwitchState.unavailable_reason st) @@
+        OpamCudf.conflict_explanations_raw st.packages cs;
+        OpamStd.Sys.exit_because `No_solution
+    in
+    let coq_dependees =
+      OpamPackage.Set.filter
+        (fun p -> not @@ OpamPackage.Name.Set.mem (OpamPackage.name p)
+            (OpamPackage.Name.Set.of_list [target_name; tactician_package])) @@
+      OpamListCommand.filter ~base:every_package st @@
+      Atom (OpamListCommand.(Depends_on ({ default_dependency_toggles with recursive = true },
+                                         [coq_package, None]))) in
+    let not_coq_dependees = OpamSolution.eq_atoms_of_packages @@
+      OpamPackage.Set.Op.(every_package -- coq_dependees) in
     (* If coq-tactician-stdlib is not requested for benchmarking, we check wether it can be installed.
        (Not so on newer versions of Coq, because the package is not needed). If so, it will be pre-installed. *)
-    let st = if List.exists (OpamPackage.Name.equal tactician_stdlib_package) @@ List.map fst packages then st else
-        let request = OpamSolver.request ~install:[tactician_stdlib_package, None] () in
+    let not_coq_dependees = not_coq_dependees @
+      if List.exists (OpamPackage.Name.equal tactician_stdlib_package) @@ List.map fst packages then [] else
+        let request = OpamSolver.request
+            ~install:[target_name, None; tactician_package, None; tactician_stdlib_package, None] () in
         let stdlib_installable =
           OpamSolution.resolve st Install
             ~orphans:OpamPackage.Set.empty
-            ~requested:(OpamPackage.Name.Set.singleton tactician_stdlib_package)
+            ~requested:(OpamPackage.Name.Set.of_list [target_name; tactician_package; tactician_stdlib_package])
             request in
         match stdlib_installable with
         | OpamTypes.Success _ ->
-          OpamClient.install st [tactician_stdlib_package, None]
-        | OpamTypes.Conflicts _ -> st in
+          [tactician_stdlib_package, None]
+        | OpamTypes.Conflicts _ -> [] in
 
-    let st = OpamClient.install st ~deps_only:true packages in
-    let deps_install_time = deps_install_time () in
+    (* Stage 1: Install Coq, Tactician, the targeted plugin (if different from Tactician) and any other
+       packages that don't depend on Coq. The reason we install those is that the requested benchmark
+       packages may need some specific version of a package that Tactician depends on, causing everything
+       to be recompiled in a next step. *)
+    let st = OpamClient.install st not_coq_dependees in
+    let target_install_time = target_install_time () in
 
+    let st = inject ~gt ~st in
     enable_bench ~st ~port ~injections_extra, fun () ->
-      let subject_install_time = timing () in
-      let st = OpamClient.install st packages in
-      let subject_install_time = subject_install_time () in
+      (* Stage 2: If coq-tactician-stdlib needs to be benchmarked, we install it now, while benchmarking
+         is enabled. This needs to happen, because other packages have an implicit dependency on it. *)
+      let subject_install_time1 = timing () in
+      let st = match List.find_opt (fun p -> OpamPackage.Name.equal tactician_stdlib_package @@ fst p) @@
+          packages with
+      | None -> st
+      | Some atom -> OpamClient.install st [atom] in
+      let subject_install_time1 = subject_install_time1 () in
 
-      let timings = `Target_install_time target_install_time, `Deps_install_time deps_install_time, `Subject_install_time subject_install_time in
+      (* Stage 3: Install any Coq-dependees that we do not wish to benchmark. For these, we do inject
+         Tactician into the compilation, so that we can learn from them. For this, we temporarily disable
+         benchmarking. *)
+      let deps_install_time = timing () in
+      disable_bench ~st;
+      let st = OpamClient.install st ~deps_only:true packages in
+      let deps_install_time = deps_install_time () in
+
+      (* Stage 4: Benchmark remaining packages *)
+
+      let subject_install_time2 = timing () in
+      let _ : string list = enable_bench ~st ~port ~injections_extra in
+      let st = OpamClient.install st packages in
+      let subject_install_time = Core.Time_ns.Span.(subject_install_time1 + subject_install_time2 ()) in
+
+      let timings = `Target_install_time target_install_time, `Deps_install_time deps_install_time,
+                    `Subject_install_time subject_install_time in
       st, timings
   in
   if OpamGlobalState.switch_exists gt switch then
