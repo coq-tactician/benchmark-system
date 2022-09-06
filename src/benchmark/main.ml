@@ -106,20 +106,21 @@ module Cmd_worker = struct
         let vo_files =
           Sys.getcwd () >>= fun old_pwd ->
           Sys.chdir dir >>= fun () ->
+          let check_file cont f =
+            if String.length f > 255 then cont else
+              (Sys.file_exists f >>= function
+                | `Unknown | `No -> cont
+                | `Yes -> cont >>| fun res -> f::res) in
           let rec detect = function
             | [] -> Deferred.return []
             | "-o"::arg::args ->
               let cont = detect args in
-              (Sys.file_exists arg >>= function
-                | `Unknown | `No -> cont
-                | `Yes -> cont >>| fun res -> arg::res)
+              check_file cont arg
             | "-l"::_::args -> detect args
             | arg::args ->
               let cont = detect args in
               let arg = arg ^ "o" in
-              (Sys.file_exists arg >>= function
-                | `Unknown | `No -> cont
-                | `Yes -> cont >>| fun res -> arg::res)
+              check_file cont arg
           in
           detect args >>= fun vo_files ->
           let vo_files = List.map ~f:Filename.realpath vo_files in
