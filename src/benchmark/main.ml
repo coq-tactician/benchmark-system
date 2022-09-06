@@ -124,11 +124,13 @@ module Cmd_worker = struct
           in
           detect args >>= fun vo_files ->
           let vo_files = List.map ~f:Filename.realpath vo_files in
+          Deferred.all_unit
+            (List.map ~f:(fun f -> Writer.with_file (f^".bench") ~f:(fun _ -> Deferred.unit)) vo_files) >>= fun () ->
           Sys.chdir old_pwd >>| fun () -> vo_files
         in
         vo_files >>= fun vo_files ->
         let bargs = ["--dev-bind"; "/"; "/"] in
-        let vo_map = List.map ~f:(fun f -> ["--dev-bind"; "/dev/null"; f]) vo_files in
+        let vo_map = List.map ~f:(fun f -> ["--bind"; f^".bench"; f]) vo_files in
         let bargs = bargs @ List.concat vo_map in
         let (/) = Filename.concat in
         let exec =
@@ -1112,7 +1114,7 @@ let main
             let data_host_prefix = !data_host_prefix in
             (if not @@ String.equal target data_host then begin
                 let exclude =
-                  if full then [] else
+                  if full then [ "*.vo.bench" ] else
                     [ "opam-root/bench/.opam-switch/sources"
                     ; "opam-root/bench/.opam-switch/build/coq.*"
                     ; "opam-root/bench/.opam-switch/build/ocaml-base-compiler.*"
@@ -1120,6 +1122,7 @@ let main
                     ; "opam-root/bench/.opam-switch/build/dose3.*"
                     ; "opam-root/download-cache"
                     ; "opam-root/repo"
+                    ; "*.vo.bench"
                     ; "*.glob"
                     ; "*.aux"] in
                 let exclude = List.concat @@ List.map ~f:(fun d -> ["--exclude"; d]) exclude in
