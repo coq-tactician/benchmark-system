@@ -1229,6 +1229,11 @@ let main
    | Error e ->
      Pipe.write error_writer e
    | Ok (info_stream, cont) ->
+     (* Filter out a super-annoying special case in coq-gappa where a Coq file is being generated and promptly
+        deleted again. *)
+     let info_stream = Pipe.filter ~f:(fun { dir; args; _ } ->
+         not (String.is_substring dir ~substring:"coq-gappa") &&
+         Array.exists ~f:(String.equal "conftest.v") args) info_stream in
      let info_stream = Pipe.map info_stream ~f:(fun ({ args; _ } as info) ->
          { info with args = Array.append args extra_args }) in
      filter_lemmas lemma_filter info_stream >>= fun info_stream ->
