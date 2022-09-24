@@ -255,7 +255,12 @@ let run_processor
      task_allocator ~prefix ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
-       let package = Filename.basename exec_info.dir in
+       let package =
+         let rec find_package = function
+           | [] -> "unknown"
+           | ".opam-switch"::"build"::package::_ -> package
+           | _::ls -> find_package ls in
+         find_package @@ Filename.parts exec_info.dir in
        let continue lemma =
          let ivar = Ivar.create () in
          Pipe.write lemma_disseminator (deadline, lemma, ivar) >>= fun () ->
