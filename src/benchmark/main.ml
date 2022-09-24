@@ -29,7 +29,8 @@ type bench_stats =
   ; inferences : int }
 type bench_result_merged =
   { lemma : string
-  ; result : bench_stats option }
+  ; result : bench_stats option
+  ; package : string }
 
 type exec_info =
   { exec   : string
@@ -254,6 +255,7 @@ let run_processor
      task_allocator ~prefix ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.ok_unit
      | `Task (relinquish, exec_info, lemma_disseminator) ->
+       let package = Filename.basename exec_info.dir in
        let continue lemma =
          let ivar = Ivar.create () in
          Pipe.write lemma_disseminator (deadline, lemma, ivar) >>= fun () ->
@@ -274,13 +276,14 @@ let run_processor
                 Deferred.Or_error.return @@ (res, all)
               | Ok (Some lemma', all), Found { lemma; trace; time; witness; inferences } ->
                 if String.equal lemma lemma' then
-                  Pipe.write reporter { lemma; result = Some { trace; time; witness; inferences } } >>| fun () ->
+                  Pipe.write reporter { lemma; package
+                                      ; result = Some { trace; time; witness; inferences } } >>| fun () ->
                   Or_error.return (None, lemma::all)
                 else
                   Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
               | Ok (Some lemma, all), Should lemma' ->
                 continue lemma' >>=? fun res ->
-                Pipe.write reporter { lemma; result = None } >>| fun () -> Ok (res, lemma::all)
+                Pipe.write reporter { lemma; package; result = None } >>| fun () -> Ok (res, lemma::all)
               | Error _ as err, _ -> Deferred.return err
               | _, _ ->
                 Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
@@ -296,7 +299,7 @@ let run_processor
           (if Deferred.is_determined error_occurred then
              Deferred.unit
            else
-             Pipe.write reporter { lemma; result = None }) >>| fun () ->
+             Pipe.write reporter { lemma; package; result = None }) >>| fun () ->
           Ok (lemma::processed_lemmas))
        >>=? fun _processed_lemmas ->
        relinquish ();
@@ -630,19 +633,19 @@ let reporter ~lemma_time ~info_stream ~bench_log ~resources_requested ~resources
       total := !total + List.length lemmas; Deferred.unit);
   Deferred.upon (Pipe.closed info_stream) (fun () -> complete := true);
   let writer = Pipe.create_writer (fun r ->
-      Pipe.iter r ~f:(fun { lemma; result } ->
+      Pipe.iter r ~f:(fun { lemma; result; package } ->
           processed := !processed + 1;
           (match result with
            | None ->
              Print.fprintf bench_log
-               "%s\t%d\n"
-               lemma lemma_time
+               "%s\t%s\t%d\n"
+               package lemma lemma_time
            | Some { trace; time; witness; inferences } ->
              synthesized := !synthesized + 1;
              let trace = String.concat ~sep:"." @@ List.map ~f:string_of_int trace in
              Print.fprintf bench_log
-               "%s\t%d\t%s\t%s\t%f\t%d\n"
-               lemma lemma_time trace witness time inferences);
+               "%s\t%s\t%d\t%s\t%s\t%f\t%d\n"
+               package lemma lemma_time trace witness time inferences);
           Writer.flushed bench_log
         )) in
   writer, fun () -> Pipe.upstream_flushed writer >>| fun _ -> summarize ()
