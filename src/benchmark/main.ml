@@ -687,13 +687,32 @@ let commit
     ~error_writer
     ~data_dir ~benchmark_repo ~benchmark_commit =
   let stdout = Lazy.force Writer.stdout in
+  let rec loop retry =
+    (Process.run
+        ~working_dir:data_dir
+        ~prog:"git"
+        ~args:["pull"; "--rebase"] () >>=? fun out ->
+      Writer.write stdout out;
+      Process.run
+       ~working_dir:data_dir
+       ~prog:"git"
+       ~args:["push"] () >>=? fun out ->
+     Writer.write stdout out;
+     Writer.write stdout ("Data directory:\n"^data_dir^"\n");
+     let dir = List.last_exn (Filename.parts data_dir) in
+     (* TODO: In the future, we should not hardcode this link *)
+     Writer.write stdout ("Online data location:\nhttps://github.com/coq-tactician/benchmark-data/tree/master/"^
+                          benchmark_commit^"/"^dir^"/\n");
+     Writer.flushed stdout >>= fun () ->
+     Deferred.Or_error.ok_unit) >>= function
+    | Ok () -> Deferred.unit
+    | Error e ->
+      if retry > 0 then begin
+        Writer.write stdout ("Pushing benchmark data failed. Retrying in 10 seconds.");
+        Clock_ns.after (Time_ns.Span.of_sec 10.) >>= fun () -> loop (retry - 1)
+      end else Pipe.write error_writer e in
   Writer.write stdout "\n\nUploading benchmark results\n\n";
   (Process.run
-      ~working_dir:data_dir
-      ~prog:"git"
-      ~args:["pull"] () >>=? fun out ->
-    Writer.write stdout out;
-    Process.run
     ~working_dir:data_dir
     ~prog:"git"
     ~args:["add"; "."] () >>=? fun out ->
@@ -701,21 +720,9 @@ let commit
   Process.run
     ~working_dir:data_dir
     ~prog:"git"
-    ~args:["commit"; "-m"; ("benchmark data for " ^ benchmark_repo ^ "#" ^ benchmark_commit)] () >>=? fun out ->
-  Writer.write stdout out;
-  Process.run
-    ~working_dir:data_dir
-    ~prog:"git"
-    ~args:["push"] () >>=? fun out ->
-  Writer.write stdout out;
-  Writer.write stdout ("Data directory:\n"^data_dir^"\n");
-  let dir = List.last_exn (Filename.parts data_dir) in
-  (* TODO: In the future, we should not hardcode this link *)
-  Writer.write stdout ("Online data location:\nhttps://github.com/coq-tactician/benchmark-data/tree/master/"^
-                       benchmark_commit^"/"^dir^"/\n");
-  Writer.flushed stdout >>= fun () ->
-  Deferred.Or_error.ok_unit) >>= function
-  | Ok () -> Deferred.unit
+    ~args:["commit"; "-m"; ("benchmark data for " ^ benchmark_repo ^ "#" ^ benchmark_commit)] () >>|? fun out ->
+  Writer.write stdout out) >>= function
+  | Ok () -> loop 10
   | Error e -> Pipe.write error_writer e
 
 let alloc_benchers =
