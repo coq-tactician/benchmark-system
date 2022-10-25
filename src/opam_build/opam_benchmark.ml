@@ -123,7 +123,8 @@ let build_switch_for_benchmark
         OpamStd.Sys.exit_because `No_solution
     in
     let coq_base_package = if OpamPackage.Set.exists
-        (fun p -> OpamPackage.Name.equal coq_core_package @@ OpamPackage.name p) every_package then
+        (fun p -> OpamPackage.Name.equal coq_core_package @@ OpamPackage.name p) @@
+      OpamPackage.Set.union every_package st.installed then
         coq_core_package else coq_package in
     let coq_dependees =
       OpamPackage.Set.filter
