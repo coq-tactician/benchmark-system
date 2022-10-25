@@ -102,6 +102,8 @@ let build_switch_for_benchmark
     let url = OpamUrl.of_string benchmark_url in
     let st = OpamPinCommand.source_pin st target_name (Some url) in
 
+    disable_bench ~st; (* In case we are reusing the build dir of a previous benchmark *)
+
     (* Stage 0: Calculate sets of packages that we need to install *)
 
     let every_root_package = packages @ [target_name, None; tactician_package, None] in
