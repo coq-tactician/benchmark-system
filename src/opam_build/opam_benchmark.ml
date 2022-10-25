@@ -8,6 +8,7 @@ let repos =
 let tactician_package = OpamPackage.Name.of_string "coq-tactician"
 let tactician_stdlib_package = OpamPackage.Name.of_string "coq-tactician-stdlib"
 let coq_package = OpamPackage.Name.of_string "coq"
+let coq_core_package = OpamPackage.Name.of_string "coq-core"
 
 let opam_init
     ~root_dir
@@ -119,13 +120,16 @@ let build_switch_for_benchmark
         OpamCudf.conflict_explanations_raw st.packages cs;
         OpamStd.Sys.exit_because `No_solution
     in
+    let coq_base_package = if OpamPackage.Set.exists
+        (fun p -> OpamPackage.Name.equal coq_core_package @@ OpamPackage.name p) every_package then
+        coq_core_package else coq_package in
     let coq_dependees =
       OpamPackage.Set.filter
         (fun p -> not @@ OpamPackage.Name.Set.mem (OpamPackage.name p)
             (OpamPackage.Name.Set.of_list [target_name; tactician_package])) @@
       OpamListCommand.filter ~base:every_package st @@
       Atom (OpamListCommand.(Depends_on ({ default_dependency_toggles with recursive = true },
-                                         [coq_package, None]))) in
+                                         [coq_base_package, None]))) in
     let not_coq_dependees = OpamSolution.eq_atoms_of_packages @@
       OpamPackage.Set.Op.(every_package -- coq_dependees) in
     (* If coq-tactician-stdlib is not requested for benchmarking, we check wether it can be installed.
