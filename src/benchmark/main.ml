@@ -708,7 +708,8 @@ let commit
     | Ok () -> Deferred.unit
     | Error e ->
       if retry > 0 then begin
-        Writer.write stdout ("Pushing benchmark data failed. Retrying in 10 seconds.");
+        Writer.write stdout ("Pushing benchmark data failed. Retrying in 10 seconds.\n");
+        Writer.write stdout (Error.to_string_hum e);
         Clock_ns.after (Time_ns.Span.of_sec 10.) >>= fun () -> loop (retry - 1)
       end else Pipe.write error_writer e in
   Writer.write stdout "\n\nUploading benchmark results\n\n";
