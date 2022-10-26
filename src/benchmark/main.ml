@@ -691,7 +691,7 @@ let commit
     (Process.run
         ~working_dir:data_dir
         ~prog:"git"
-        ~args:["pull"; "--rebase"] () >>=? fun out ->
+        ~args:["pull"; "--no-rebase"] () >>=? fun out ->
       Writer.write stdout out;
       Process.run
        ~working_dir:data_dir
