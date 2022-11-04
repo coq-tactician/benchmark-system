@@ -104,36 +104,39 @@ module Cmd_worker = struct
 
       let make_process { exec; args; env; dir } =
         let args = List.tl_exn @@ Array.to_list args in
-        let vo_postfix = ".bench-" ^ Pid.to_string @@ Unix.getpid () in
-        let vo_files =
-          Sys.getcwd () >>= fun old_pwd ->
-          Sys.chdir dir >>= fun () ->
-          let check_file cont f =
-            if String.length f > 255 then cont else
-              (Sys.file_exists f >>= function
-                | `Unknown | `No -> cont
-                | `Yes -> cont >>| fun res -> f::res) in
-          let rec detect = function
-            | [] -> Deferred.return []
-            | "-o"::arg::args ->
-              let cont = detect args in
-              check_file cont arg
-            | "-l"::_::args -> detect args
-            | arg::args ->
-              let cont = detect args in
-              let arg = arg ^ "o" in
-              check_file cont arg
-          in
-          detect args >>= fun vo_files ->
-          let vo_files = List.map ~f:Filename.realpath vo_files in
-          Deferred.all_unit
-            (List.map ~f:(fun f -> Writer.with_file (f^vo_postfix) ~f:(fun _ -> Deferred.unit)) vo_files) >>= fun () ->
-          Sys.chdir old_pwd >>| fun () -> vo_files
+        let shadow_postfix = ".bench-" ^ Pid.to_string @@ Unix.getpid () in
+        let shadow_exts = [".glob"; ".vo"; ".vok"; ".vos"] in
+        Sys.getcwd () >>= fun old_pwd ->
+        Sys.chdir dir >>= fun () ->
+        let check_file cont f =
+          let base = Stdlib.Filename.remove_extension f in
+          let fs = List.map ~f:(fun ext -> base ^ ext) shadow_exts in
+          Deferred.List.filter ~f:(fun f ->
+              if String.length f > 255 then Deferred.return false else
+                Sys.file_exists f >>| function
+                | `Unknown | `No -> false
+                | `Yes -> true
+            ) fs >>= fun fs ->
+          cont >>| fun res -> fs@res in
+        let rec detect = function
+          | [] -> Deferred.return []
+          | "-o"::arg::args ->
+            let cont = detect args in
+            check_file cont arg
+          | "-l"::_::args -> detect args
+          | arg::args ->
+            let cont = detect args in
+            check_file cont arg
         in
-        vo_files >>= fun vo_files ->
+        detect args >>= fun to_shadow ->
+        let to_shadow = List.map ~f:Filename.realpath to_shadow in
+        Deferred.all_unit
+          (List.map ~f:(fun f ->
+               Writer.with_file (f^shadow_postfix) ~f:(fun _ -> Deferred.unit)) to_shadow) >>= fun () ->
+        Sys.chdir old_pwd >>= fun () ->
         let bargs = ["--dev-bind"; "/"; "/"] in
-        let vo_map = List.map ~f:(fun f -> ["--bind"; f^vo_postfix; f]) vo_files in
-        let bargs = bargs @ List.concat vo_map in
+        let shadow_map = List.map ~f:(fun f -> ["--bind"; f^shadow_postfix; f]) to_shadow in
+        let bargs = bargs @ List.concat shadow_map in
         let (/) = Filename.concat in
         let exec =
           String.chop_suffix_exn exec ~suffix:("lib"/"coq-tactician"/"coqc.real") ^ "bin"/"coqc" in
