@@ -1153,7 +1153,7 @@ let main
                   else
                     let rsync_remote_shell = "rsync-preprocess " ^ prefix ^ " rsync-preprocess-marker" in
                     prefix_invocation data_host_prefix
-                      ([ "rsync"; "-e"; rsync_remote_shell; "-qa"; "--no-perms"] @ exclude @
+                      ([ "rsync"; "-e"; rsync_remote_shell; "-qa"; "--no-perms"; "--chmod=ugo=rwX"] @ exclude @
                        [ copydir; target^":"^copydir]) in
                 debug_output ("Rsyncing from data host " ^ data_host ^ " to " ^ target ^
                               " at time " ^ string_of_int t ^ "/" ^
