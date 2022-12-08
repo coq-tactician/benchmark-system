@@ -20,6 +20,7 @@ let opam_init
     ~no_env_notice:true
     ~keep_build_dir:true
     ~assume_depexts:true
+    ~no_depexts:true
     ()
 
 let init_root () =
