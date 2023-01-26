@@ -9,7 +9,7 @@ let excluded_names =
   ; "coq-compcert-64"; "coq-vst-64"
   (* these are old, coq-compcert and coq-vst are now 64b, while coq-compcert-32 and coq-vst-32 are 32b *)
   ; "coq-compcert-32"; "coq-vst-32"
-   (* these have a 99% overlap with coq-compcert and coq-vst, hence we exlude them *)
+  (* these have a 99% overlap with coq-compcert and coq-vst, hence we exlude them *)
   ; "gappa"
   (* renamed to coq-gappa *)
   ; "coq-engine-bench"; "coq-engine-bench-lite"; "coq-performance-tests"; "coq-performance-tests-lite"
@@ -23,7 +23,11 @@ let excluded_names =
   ; "menhirLib"; "menhirSdk"; "menhir"
   (* coq-menhirlib should cover tihs *)
   ; "coq-serapi"
-    (* not a Coq development *)
+  (* not a Coq development *)
+  ; "coq-goedel"
+  (* is now part of coq-hydra-battles *)
+  ; "coq-io-list"
+    (* is now part of coq-io *)
   ]
 
 let exclude_versions =
