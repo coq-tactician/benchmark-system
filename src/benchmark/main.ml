@@ -193,10 +193,11 @@ module Cmd_worker = struct
           force wait >>= function
           | Ok _ -> Deferred.unit
           | Error (`Exit_non_zero i) ->
-            Pipe.write w (`Error (Error.createf "Abnormal exit code for coqc: %d\n Invocation:\n%s" i str))
+            Pipe.write w (`Error (Error.createf "Abnormal exit code for coqc on host %s: %d\n Invocation:\n%s"
+                                    (Unix.gethostname ()) i str))
           | Error (`Signal s) ->
-            Pipe.write w (`Error (Error.createf "Abnormal exit signal for coqc: %s\n Invocation:\n%s"
-                                    (Signal.to_string s) str))
+            Pipe.write w (`Error (Error.createf "Abnormal exit signal for coqc on host %s: %s\n Invocation:\n%s"
+                                    (Unix.gethostname ()) (Signal.to_string s) str))
 
       let process =
         C.create_pipe ~f:process_impl ~bin_input:Cmd.bin_t ~bin_output:Response.bin_t ()
