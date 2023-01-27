@@ -1086,7 +1086,8 @@ let main
        None
      | `Yes ->
        Reader.file_lines (data_dir/"combined.bench") >>= fun lines ->
-       let already_done = List.filter_map ~f:(fun line -> List.hd @@ String.split ~on:'\t' line) lines in
+       let already_done = List.filter_map ~f:(fun line ->
+           Option.map ~f:List.hd @@ List.tl @@ String.split ~on:'\t' line) lines in
        (if List.is_empty already_done then
          Pipe.write error_writer (Error.of_string "The previous benchmark was empty, nothing to resume")
          else Deferred.unit) >>| fun () ->
