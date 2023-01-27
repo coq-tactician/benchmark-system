@@ -118,12 +118,19 @@ module Cmd_worker = struct
                 | `Yes -> true
             ) fs >>= fun fs ->
           cont >>| fun res -> fs@res in
+        let ignore_single_args =
+          ["-I"; "-include"; "-top"; "-topfile"; "-coqlib"; "-excludedir"
+          ; "-load-vernac-source"; "-l"; "-load-vernac-source-verbose"; "-lv"
+          ; "-load-vernac-object"; "-require-import"; "-ri"; "-require-export"; "-re"] in
+        let ignore_double_args =
+          ["-Q"; "-R"; "-require-import-from"; "-rifrom"; "-require-export-from"; "-refrom"] in
         let rec detect = function
           | [] -> Deferred.return []
+          | s::_::args when List.mem ~equal:String.equal ignore_single_args s -> detect args
+          | s::_::_::args when List.mem ~equal:String.equal ignore_double_args s -> detect args
           | "-o"::arg::args ->
             let cont = detect args in
             check_file cont arg
-          | "-l"::_::args -> detect args
           | arg::args ->
             let cont = detect args in
             check_file cont arg
