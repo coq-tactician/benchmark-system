@@ -15,13 +15,13 @@ let excluded_names =
   ; "coq-engine-bench"; "coq-engine-bench-lite"; "coq-performance-tests"; "coq-performance-tests-lite"
   (* benchmarks *)
   ; "coq-fiat-crypto-legacy"; "coq-fiat-crypto-legacy-extra"; "coq-fiat-core"; "coq-fiat-crypto-with-bedrock"; "coq-fiat-parsers"
-    (* seems to all be part of coq-fiat-crypto *)
+  (* seems to all be part of coq-fiat-crypto *)
   ; "coq-flocq3"
-  (* legacy package *)
+  (* legacy package, replaced by coq-flocq *)
   ; "coq-rewriter-perf-Fast"; "coq-rewriter-perf-Medium"; "coq-rewriter-perf-Slow"; "coq-rewriter-perf-SuperFast"; "coq-rewriter-perf-VerySlow"
   (* Some benchmark *)
   ; "menhirLib"; "menhirSdk"; "menhir"
-  (* coq-menhirlib should cover tihs *)
+  (* coq-menhirlib should cover this *)
   ; "coq-serapi"
   (* not a Coq development *)
   ; "coq-goedel"
