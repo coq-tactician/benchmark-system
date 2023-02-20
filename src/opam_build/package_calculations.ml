@@ -24,10 +24,12 @@ let excluded_names =
   (* coq-menhirlib should cover this *)
   ; "coq-serapi"
   (* not a Coq development *)
-  ; "coq-goedel"
-  (* is now part of coq-hydra-battles *)
+  (* ; "coq-goedel" *)
+  (* coq-goedel is now part of coq-hydra-battles, but this has not been released in opam yet *)
   ; "coq-io-list"
-    (* is now part of coq-io *)
+  (* is now part of coq-io *)
+  ; "coq-metacoq-checker"
+  (* replaced by coq-metacoq-safechecker *)
   ]
 
 let exclude_versions =
