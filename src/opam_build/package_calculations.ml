@@ -10,8 +10,6 @@ let excluded_names =
   (* these are old, coq-compcert and coq-vst are now 64b, while coq-compcert-32 and coq-vst-32 are 32b *)
   ; "coq-compcert-32"; "coq-vst-32"
   (* these have a 99% overlap with coq-compcert and coq-vst, hence we exlude them *)
-  ; "gappa"
-  (* renamed to coq-gappa *)
   ; "coq-engine-bench"; "coq-engine-bench-lite"; "coq-performance-tests"; "coq-performance-tests-lite"
   (* benchmarks *)
   ; "coq-fiat-crypto-legacy"; "coq-fiat-crypto-legacy-extra"; "coq-fiat-core"; "coq-fiat-crypto-with-bedrock"; "coq-fiat-parsers"
