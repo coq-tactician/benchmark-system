@@ -46,6 +46,13 @@ let debug_output =
     if !enable_debug then
       Writer.write_line stderr s
 
+let run_git ~working_dir args =
+  Process.run
+    ~env:(`Override ["GIT_TERMINAL_PROMPT", Some "0"])
+    ~working_dir
+    ~prog:"git"
+    ~args ()
+
 module Counter : sig
   type t
   val make : int -> t
@@ -404,12 +411,12 @@ module Build_worker = struct
          let repo = if String.is_prefix ~prefix:"git+http" repo then
              String.chop_prefix_exn ~prefix:"git+" repo else repo in
          let cmds =
-           [ "git", ["init"]
-           ; "git", ["remote"; "add"; "origin"; repo]
-           ; "git", ["fetch"; "--depth"; "1"; "origin"; commit]
-           ; "git", ["checkout"; "FETCH_HEAD"]] in
-         (Deferred.Or_error.List.iter cmds ~f:(fun (prog, args) ->
-              Process.run ~working_dir:dir ~prog ~args () >>|? fun _ -> ())) >>=? fun () ->
+           [ ["init"]
+           ; ["remote"; "add"; "origin"; repo]
+           ; ["fetch"; "--depth"; "1"; "origin"; commit]
+           ; ["checkout"; "FETCH_HEAD"]] in
+         (Deferred.Or_error.List.iter cmds ~f:(fun args ->
+              run_git ~working_dir:dir args >>|? fun _ -> ())) >>=? fun () ->
          let prereq_file = Filename.concat dir "prerequisites" in
          (Sys.file_exists prereq_file >>= function
            | `No | `Unknown -> Deferred.Or_error.return ()
@@ -699,15 +706,9 @@ let commit
     ~data_dir ~benchmark_repo ~benchmark_commit =
   let stdout = Lazy.force Writer.stdout in
   let rec loop retry =
-    (Process.run
-        ~working_dir:data_dir
-        ~prog:"git"
-        ~args:["pull"; "--no-rebase"] () >>=? fun out ->
+    (run_git ~working_dir:data_dir ["pull"; "--no-rebase"] >>=? fun out ->
       Writer.write stdout out;
-      Process.run
-       ~working_dir:data_dir
-       ~prog:"git"
-       ~args:["push"] () >>=? fun out ->
+      run_git ~working_dir:data_dir ["push"] >>=? fun out ->
      Writer.write stdout out;
      Writer.write stdout ("Data directory:\n"^data_dir^"\n");
      let dir = List.last_exn (Filename.parts data_dir) in
@@ -724,15 +725,10 @@ let commit
         Clock_ns.after (Time_ns.Span.of_sec 10.) >>= fun () -> loop (retry - 1)
       end else Pipe.write error_writer e in
   Writer.write stdout "\n\nUploading benchmark results\n\n";
-  (Process.run
-    ~working_dir:data_dir
-    ~prog:"git"
-    ~args:["add"; "."] () >>=? fun out ->
+  (run_git ~working_dir:data_dir ["add"; "."] >>=? fun out ->
   Writer.write stdout out;
-  Process.run
-    ~working_dir:data_dir
-    ~prog:"git"
-    ~args:["commit"; "-m"; ("benchmark data for " ^ benchmark_repo ^ "#" ^ benchmark_commit)] () >>|? fun out ->
+  run_git ~working_dir:data_dir
+    ["commit"; "-m"; ("benchmark data for " ^ benchmark_repo ^ "#" ^ benchmark_commit)] >>|? fun out ->
   Writer.write stdout out) >>= function
   | Ok () -> loop 10
   | Error e -> Pipe.write error_writer e
@@ -1070,10 +1066,7 @@ let main
     ~resume
   =
   let (/) = Filename.concat in
-  Process.run
-    ~working_dir:benchmark_data
-    ~prog:"git"
-    ~args:["pull"] () >>=? fun out ->
+  run_git ~working_dir:benchmark_data ["pull"] >>=? fun out ->
   let stdout = Lazy.force Writer.stdout in
   Writer.write stdout out;
   prepare_data_dir ~benchmark_data ~benchmark_commit ~lemma_time >>= fun data_dir ->
