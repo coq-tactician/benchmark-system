@@ -9,6 +9,7 @@ let main () =
       ~benchmark_target:"coq-tactician"
       ~benchmark_url:
         "git+file:///home/lasse/Documents/Projects/Tactician/develop/coq-tactician#newbench"
+      ~pins:[]
       ~packages:["coq-tactician-stdlib"]
       ~injections_extra:[]
   >>= fun (r, cont) ->

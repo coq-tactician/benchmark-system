@@ -94,7 +94,7 @@ let timing () =
     Time_ns.abs_diff before after
 
 let build_switch_for_benchmark
-    ~gt ~rt ~port ~benchmark_target ~benchmark_url ~packages ~injections_extra =
+    ~gt ~rt ~port ~benchmark_target ~benchmark_url ~pins ~packages ~injections_extra =
   let switch = OpamSwitch.of_string "bench" in
   let packages = List.map OpamFormula.atom_of_string packages in
   let do_actions st =
@@ -102,6 +102,9 @@ let build_switch_for_benchmark
     let target_name = OpamPackage.Name.of_string benchmark_target in
     let url = OpamUrl.of_string benchmark_url in
     let st = OpamPinCommand.source_pin st target_name (Some url) in
+    let st = List.fold_left (fun st pkg ->
+        let pkg = OpamPackage.of_string pkg in
+        OpamPinCommand.version_pin st (OpamPackage.name pkg) (OpamPackage.version pkg)) st pins in
 
     disable_bench ~st; (* In case we are reusing the build dir of a previous benchmark *)
 
@@ -207,6 +210,7 @@ let compile_for_benchmark
     ~root_dir
     ~benchmark_target
     ~benchmark_url
+    ~pins
     ~packages
     ~injections_extra
   =
@@ -218,6 +222,7 @@ let compile_for_benchmark
   let inj_flags, cont = build_switch_for_benchmark ~gt ~rt ~port
     ~benchmark_target
     ~benchmark_url
+    ~pins
     ~packages
     ~injections_extra in
   inj_flags, fun () ->
@@ -255,6 +260,7 @@ let compile_and_retrieve_benchmark_info
     ~root_dir
     ~benchmark_target
     ~benchmark_url
+    ~pins
     ~packages
     ~injections_extra
   : (pre_bench_info Pipe.Reader.t * _ Deferred.t) Deferred.t =
@@ -273,7 +279,7 @@ let compile_and_retrieve_benchmark_info
   let `Inet (_addr, port) = Async_unix.Tcp.Server.listening_on_address server in
   In_thread.run (fun () ->
       compile_for_benchmark
-        ~port ~root_dir ~benchmark_target ~benchmark_url ~packages ~injections_extra)
+        ~port ~root_dir ~benchmark_target ~benchmark_url ~pins ~packages ~injections_extra)
   >>| fun (to_remove, cont) ->
   let r = Pipe.map r ~f:(post_process_info to_remove) in
   let cont =

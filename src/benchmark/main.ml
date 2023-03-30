@@ -354,6 +354,7 @@ module Build_worker = struct
       type t = { root_dir : string
                ; benchmark_target : string
                ; benchmark_url : string
+               ; pins : string list
                ; packages : string list
                ; injections_extra : string list } [@@deriving bin_io]
     end
@@ -440,11 +441,12 @@ module Build_worker = struct
         C.create_rpc ~f:prereq_impl ~bin_input:Prereq.bin_t ~bin_output:bin_string ()
 
       let build_impl ~worker_state:() ~conn_state:()
-          Cmd.{ root_dir; benchmark_target; benchmark_url; packages; injections_extra } =
+          Cmd.{ root_dir; benchmark_target; benchmark_url; pins; packages; injections_extra } =
         compile_and_retrieve_benchmark_info
             ~root_dir
             ~benchmark_target
             ~benchmark_url
+            ~pins
             ~packages
             ~injections_extra
         >>| fun (info, cont) ->
@@ -474,6 +476,7 @@ let compile_and_retrieve_benchmark_info
     ~benchmark_target
     ~benchmark_repo
     ~benchmark_commit
+    ~pins
     ~packages
     ~injections_extra
     ~add_job ~remove_job ~switch_data_host
@@ -546,7 +549,7 @@ let compile_and_retrieve_benchmark_info
     Build_worker.Connection.run conn
       ~f:Build_worker.functions.build
       ~arg:{ root_dir = Filename.concat scratch "opam-root"; benchmark_target
-           ; benchmark_url = benchmark_repo^"#"^benchmark_commit; packages; injections_extra } >>|? fun r ->
+           ; benchmark_url = benchmark_repo^"#"^benchmark_commit; pins; packages; injections_extra } >>|? fun r ->
     let r1, r2 = Pipe.fork ~pushback_uses:`Fast_consumer_only r in
     let r1 = Pipe.filter_map r1 ~f:(function | `Info info -> Some info | `Timings _ -> None) in
     let r2 = Pipe.filter_map r2 ~f:(function | `Info _ -> None | `Timings timings -> Some timings) in
@@ -1061,6 +1064,7 @@ let main
     ~benchmark_repo
     ~benchmark_commit
     ~lemma_time
+    ~pins
     ~packages
     ~shared_filesystem
     ~resume
@@ -1242,6 +1246,7 @@ let main
      ~benchmark_target
      ~benchmark_repo
      ~benchmark_commit
+     ~pins
      ~packages
      ~injections_extra
      ~add_job ~remove_job ~switch_data_host
@@ -1474,6 +1479,8 @@ Examples:
      and+ resume = flag "resume" no_arg
          ~doc:"Look up the previous (partial) benchmark with the same parameters as specified in the current \
                invocation, and finish that benchmark appending old the existing log files."
+     and+ pins = flag "pin" (listed string)
+         ~doc:"package-name.version Pin a package to the given version."
      and+ packages = anon (non_empty_sequence_as_list ("package" %: string))
      in fun () ->
        enable_debug := debug;
@@ -1501,7 +1508,7 @@ Examples:
            ~injections_extra
            ~scratch ~delay_benchmark
            ~bench_allocator ~compile_allocator ~max_requests ~max_running
-           ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~lemma_time ~packages
+           ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~lemma_time ~pins ~packages
            ~shared_filesystem ~resume)
 
 (* TODO: Use brwap to sandbox to the scratch directory *)
