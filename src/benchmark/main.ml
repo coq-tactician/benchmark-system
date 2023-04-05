@@ -275,12 +275,14 @@ let run_processor
      ; Pipe.transfer_id perr1 processor_err
      ; Pipe.transfer_id perr2 stderr ] in
    don't_wait_for (error_occurred >>= fun () -> Cmd_worker.Connection.close conn);
+   let exec_str exec_info = ("(cd " ^ exec_info.dir ^ " && " ^ exec_info.exec ^ " " ^
+                             String.concat ~sep:" " (Array.to_list exec_info.args) ^ ")") in
    (Cmd_worker.Connection.run conn
      ~f:Cmd_worker.functions.hostname
      ~arg:() >>=? fun hostname ->
-   let rec loop () =
+   let rec loop prev_execs =
      task_allocator ~prefix ~hostname deadline >>= function
-     | `Stop -> Deferred.Or_error.ok_unit
+     | `Stop -> Deferred.Or_error.return prev_execs
      | `Task (relinquish, exec_info, lemma_disseminator) ->
        let package =
          let rec find_package = function
@@ -343,19 +345,17 @@ let run_processor
        (match state with
         | `Finished processed_lemmas -> Deferred.Or_error.return processed_lemmas
         | _ ->
-          let exec_str = ("(cd " ^ exec_info.dir ^ " && " ^ exec_info.exec ^ " " ^
-                          String.concat ~sep:" " (Array.to_list exec_info.args) ^ ")") in
-          Deferred.Or_error.errorf "Coq process ended abruptly. Invocation: %s" exec_str)
+          Deferred.Or_error.errorf "Coq process ended abruptly. Invocation: %s" (exec_str exec_info))
        >>=? fun _processed_lemmas ->
        relinquish ();
-       loop () in
-   with_job ~prefix ~job_name ~hostname loop) >>=  fun loop_res ->
+       loop (exec_info::prev_execs) in
+   with_job ~prefix ~job_name ~hostname loop []) >>=  fun loop_res ->
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
    Writer.close (Process.stdin process) >>= fun () ->
    (Process.wait process >>= function
      | Ok () -> (match loop_res with
-         | Ok () -> Deferred.unit
+         | Ok _ -> Deferred.unit
          | Error pe -> write_error ~fatality:NonFatal error_writer pe)
      | Error pe ->
        let err_str = match pe with
@@ -365,7 +365,10 @@ let run_processor
                         prefix ^ ". Signal: " ^ Signal.to_string s in
        Pipe.write processor_err err_str >>= fun () ->
        match loop_res with
-       | Ok () -> write_error error_writer @@ Error.of_string err_str
+       | Ok excs ->
+         let extra_err = Error.createf "Executions done:\n %s"
+             (String.concat ~sep:"\n" @@ List.map ~f:exec_str excs) in
+         write_error ~fatality:NonFatal error_writer @@ Error.of_list [extra_err; Error.of_string err_str]
        | Error le -> write_error ~fatality:NonFatal error_writer (Error.of_list [le; Error.of_string err_str]))
    >>| Or_error.return) >>= function
   | Ok () -> Deferred.unit
@@ -1255,11 +1258,11 @@ let main
      let jobs = String.Set.remove jobs job_name in
      hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
      if String.Set.is_empty jobs then wait_for_data prefix None else Deferred.unit in
-   let with_job ~prefix ~job_name ~hostname f =
+   let with_job ~prefix ~job_name ~hostname f x =
      add_job ~job_name ~hostname;
      Monitor.protect ~finally:(fun () ->
          remove_job ~prefix ~job_name ~hostname)
-       f in
+       (fun () -> f x) in
    let wait_for_data ~prefix ~full ~hostname ~time =
      (String.Map.find_exn !hosts hostname).wait_for_data prefix (Some (full, time)) in
    let switch_data_host ~new_prefix ~new_host =
