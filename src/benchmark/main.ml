@@ -22,6 +22,10 @@ type bench_response =
   | Bench of int
 [@@deriving bin_io]
 
+type lemma_disseminator_communication =
+  | ShouldBench of (Time_ns.t * string * bench_response Ivar.t)
+  | Return of string
+
 type bench_stats =
   { trace : int list
   ; time : float
@@ -78,6 +82,7 @@ module Cmd_worker = struct
     module Response = struct
       type t =
         [ `Error of Error.t
+        | `Finished
         | `Stderr of string
         | `Stdout of string
         | `Result of bench_result ]
@@ -205,7 +210,7 @@ module Cmd_worker = struct
           Writer.close sock_in >>= fun () ->
           Reader.close sock_out >>= fun () ->
           force wait >>= function
-          | Ok _ -> Deferred.unit
+          | Ok _ -> Pipe.write w `Finished
           | Error (`Exit_non_zero i) ->
             Pipe.write w (`Error (Error.createf "Abnormal exit code for coqc on host %s: %d\n Invocation:\n%s"
                                     (Unix.gethostname ()) i str))
@@ -281,13 +286,17 @@ let run_processor
          find_package @@ Filename.parts exec_info.dir in
        let continue lemma =
          let ivar = Ivar.create () in
-         Pipe.write lemma_disseminator (deadline, lemma, ivar) >>= fun () ->
+         Pipe.write lemma_disseminator (ShouldBench (deadline, lemma, ivar)) >>= fun () ->
          Ivar.read ivar >>= fun res ->
          Cmd_worker.Connection.run conn
            ~f:Cmd_worker.functions.continue
-           ~arg:res >>|? fun () -> match res with
-         | Skip -> None
-         | Bench _ -> Some lemma in
+           ~arg:res >>= function
+           | Error exn ->
+             Pipe.write lemma_disseminator (Return lemma) >>= fun () ->
+             Deferred.Or_error.fail exn
+           | Ok () -> match res with
+             | Skip -> Deferred.Or_error.return None
+             | Bench _ -> Deferred.Or_error.return (Some lemma) in
        Cmd_worker.Connection.run conn
          ~f:Cmd_worker.functions.process
          ~arg:exec_info >>=? fun r ->
@@ -312,40 +321,48 @@ let run_processor
                 Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
              )
            | `Error e ->
-             Pipe.write coq_err (Error.to_string_hum e) >>= fun () -> Deferred.Or_error.fail e
+             (match acc with
+              | Ok (Some lemma, _) ->
+                Pipe.write lemma_disseminator (Return lemma)
+              | _ -> Deferred.unit) >>= fun () ->
+               Pipe.write coq_err (Error.to_string_hum e) >>= fun () -> Deferred.Or_error.fail e
+           | `Finished ->
+             (match acc with
+              | Ok (Some lemma, _) -> Pipe.write reporter { lemma; package; result = None }
+              | _ -> Deferred.unit) >>| fun () -> acc
            | `Stdout str -> Pipe.write coq_out str >>| fun () -> acc
            | `Stderr str -> Pipe.write coq_err str >>= fun () -> Pipe.write stderr str >>| fun () -> acc
          ) >>=? fun (final, processed_lemmas) ->
        (match final with
         | None -> Deferred.Or_error.return processed_lemmas
         | Some lemma ->
-          (if Deferred.is_determined error_occurred then
-             Deferred.unit
-           else
-             Pipe.write reporter { lemma; package; result = None }) >>| fun () ->
-          Ok (lemma::processed_lemmas))
+          let exec_str = ("(cd " ^ exec_info.dir ^ " && " ^ exec_info.exec ^ " " ^
+                          String.concat ~sep:" " (Array.to_list exec_info.args) ^ ")") in
+          Deferred.Or_error.errorf "Coq process ended abruptly at lemma %s. Invocation: %s" lemma exec_str)
        >>=? fun _processed_lemmas ->
        relinquish ();
        loop () in
-   with_job ~prefix ~job_name ~hostname loop) >>= fun res ->
+   with_job ~prefix ~job_name ~hostname loop) >>=  fun loop_res ->
    Cmd_worker.Connection.close conn >>= fun () ->
    Deferred.all_unit pipes >>= fun () ->
    Writer.close (Process.stdin process) >>= fun () ->
    (Process.wait process >>= function
-     | Ok () -> Deferred.unit
-     | Error (`Exit_non_zero i) ->
-       let err = "Abnormal exit code for command worker: " ^ job_name ^ " with prefix " ^
-                 prefix ^ ". Code: " ^ string_of_int i in
-       Pipe.write processor_err err >>= fun () ->
-       Pipe.write error_writer (Error.of_string err)
-     | Error (`Signal s) ->
-       let err = "Abnormal exit signal for command worker: " ^ job_name ^ " with prefix " ^
-                 prefix ^ ". Signal: " ^ Signal.to_string s in
-       Pipe.write processor_err err >>= fun () ->
-       Pipe.write error_writer (Error.of_string err)) >>| fun () -> res)
-  >>= function
+     | Ok () -> (match loop_res with
+         | Ok () -> Deferred.unit
+         | Error pe -> Pipe.write error_writer pe)
+     | Error pe ->
+       let err_str = match pe with
+         | `Exit_non_zero i -> "Abnormal exit code for command worker: " ^ job_name ^ " with prefix " ^
+                               prefix ^ ". Code: " ^ string_of_int i
+         | `Signal s -> "Abnormal exit signal for command worker: " ^ job_name ^ " with prefix " ^
+                        prefix ^ ". Signal: " ^ Signal.to_string s in
+       Pipe.write processor_err err_str >>= fun () ->
+       match loop_res with
+       | Ok () -> Pipe.write error_writer @@ Error.of_string err_str
+       | Error le -> Pipe.write error_writer (Error.of_list [le; Error.of_string err_str]))
+   >>| Or_error.return) >>= function
   | Ok () -> Deferred.unit
-  | Error e -> if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
+  | Error e -> Pipe.write error_writer e
 
 module Build_worker = struct
   module T = struct
@@ -927,7 +944,7 @@ type host_data =
 
 type compile_unit_data =
   { exec_info          : exec_info
-  ; lemma_disseminator : (Time_ns.t * string * bench_response Ivar.t) Pipe.Writer.t
+  ; lemma_disseminator : lemma_disseminator_communication Pipe.Writer.t
   ; executors          : Counter.t
   ; lemma_count        : unit -> int
   ; abstract_time      : int }
@@ -944,13 +961,15 @@ let task_disseminator
   let lemma_token_queue = ResourceManager.make_queue () in
   let time_remaining deadline =
     Time_ns.Span.(Time_ns.diff deadline (Time_ns.now ()) > lemma_time') in
-  let lemma_disseminator lemmas =
+  let lemma_disseminator lemmas : lemma_disseminator_communication Pipe.Writer.t * 'a
+      =
     let lemmas = ref lemmas in
     (Pipe.create_writer @@ fun r ->
      let rec loop () =
        Pipe.read r >>= function
        | `Eof -> assert false
-       | `Ok (deadline, lemma, ivar) ->
+       | `Ok (Return _lemma) -> Deferred.unit
+       | `Ok (ShouldBench (deadline, lemma, ivar)) ->
          match time_remaining deadline, String.Map.find !lemmas lemma with
          | _, None | false, _ ->
            Ivar.fill ivar Skip;
