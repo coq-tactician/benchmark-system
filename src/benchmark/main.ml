@@ -17,6 +17,10 @@ type bench_result =
       ; inferences : int }
 [@@deriving bin_io]
 
+type error_type = Fatal | NonFatal
+
+let write_error ?(fatality=Fatal) w e = Pipe.write w (fatality, e)
+
 type bench_response =
   | Skip
   | Bench of int
@@ -260,7 +264,7 @@ let run_processor
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
   (Cmd_worker.spawn_in_foreground
      ~how:(remote_how prefix)
-     ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
+     ~on_failure:(fun e -> don't_wait_for (write_error error_writer e))
      ~shutdown_on:Connection_closed
      { name = job_name }
      ~connection_state_init_arg:()
@@ -349,7 +353,7 @@ let run_processor
    (Process.wait process >>= function
      | Ok () -> (match loop_res with
          | Ok () -> Deferred.unit
-         | Error pe -> Pipe.write error_writer pe)
+         | Error pe -> write_error ~fatality:NonFatal error_writer pe)
      | Error pe ->
        let err_str = match pe with
          | `Exit_non_zero i -> "Abnormal exit code for command worker: " ^ job_name ^ " with prefix " ^
@@ -358,11 +362,11 @@ let run_processor
                         prefix ^ ". Signal: " ^ Signal.to_string s in
        Pipe.write processor_err err_str >>= fun () ->
        match loop_res with
-       | Ok () -> Pipe.write error_writer @@ Error.of_string err_str
-       | Error le -> Pipe.write error_writer (Error.of_list [le; Error.of_string err_str]))
+       | Ok () -> write_error error_writer @@ Error.of_string err_str
+       | Error le -> write_error ~fatality:NonFatal error_writer (Error.of_list [le; Error.of_string err_str]))
    >>| Or_error.return) >>= function
   | Ok () -> Deferred.unit
-  | Error e -> Pipe.write error_writer e
+  | Error e -> write_error error_writer e
 
 module Build_worker = struct
   module T = struct
@@ -525,7 +529,7 @@ let compile_and_retrieve_benchmark_info
   | `Allocated `Ok prefix ->
     Build_worker.spawn_in_foreground
       ~how:(remote_how prefix)
-      ~on_failure:(fun e -> don't_wait_for (Pipe.write error_writer e))
+      ~on_failure:(fun e -> don't_wait_for (write_error error_writer e))
       ~shutdown_on:Connection_closed
       ()
       ~connection_state_init_arg:()
@@ -583,12 +587,12 @@ let compile_and_retrieve_benchmark_info
           | Error (`Exit_non_zero i) ->
             let err = "Abnormal exit code for build worker on host " ^ hostname ^ ". Code: " ^ string_of_int i in
             Pipe.write opam_err err >>= fun () ->
-            Pipe.write error_writer (Error.of_string err)
+            write_error error_writer (Error.of_string err)
           | Error (`Signal s) ->
             let err = "Abnormal exit signal for build worker on host " ^ hostname ^
                       ". Signal: " ^ Signal.to_string s in
             Pipe.write opam_err err >>= fun () ->
-            Pipe.write error_writer (Error.of_string err)) >>= fun () ->
+            write_error error_writer (Error.of_string err)) >>= fun () ->
       let pstdin = Process.stdin p in
       Monitor.detach (Writer.monitor pstdin);
       Writer.write pstdin "done\n";
@@ -598,9 +602,9 @@ let compile_and_retrieve_benchmark_info
       Process.wait p >>= function
       | Ok () -> Deferred.unit
       | Error (`Exit_non_zero i) ->
-        Pipe.write error_writer @@ Error.createf "Compile alloc protocol error: Abnormal exit code: %d" i
+        write_error error_writer @@ Error.createf "Compile alloc protocol error: Abnormal exit code: %d" i
       | Error (`Signal s) ->
-        Pipe.write error_writer @@ Error.createf "Compile alloc protocol error: Abnormal signal: %s" @@
+        write_error error_writer @@ Error.createf "Compile alloc protocol error: Abnormal signal: %s" @@
         Signal.to_string s
     in
     match Base.Queue.to_list timings with
@@ -617,7 +621,7 @@ let compile_and_retrieve_benchmark_info
       Pipe.write opam_timings str >>= fun () ->
       finish
     | _ ->
-      Pipe.write error_writer (Error.of_string "Initial build did not fully complete") >>= fun () ->
+      write_error error_writer (Error.of_string "Initial build did not fully complete") >>= fun () ->
       finish
 
 let write_bench_params ~scratch =
@@ -696,18 +700,24 @@ let reporter ~lemma_time ~info_stream ~bench_log ~resources_requested ~resources
 let error_handler error_log =
   let stderr = Lazy.force Writer.stderr in
   let error_occurred = Ivar.create () in
-  let process_error e =
-    if Ivar.is_empty error_occurred then
-      (let str = "\n\n------------------ Benchmark terminated -----------------------\n\n" in
-        Writer.write stderr str;
-        Writer.write error_log str);
-    Ivar.fill_if_empty error_occurred ();
-    let str = "Fatal benchmarking error: " ^ Error.to_string_hum e ^ "\n" in
-    Writer.write stderr str;
-    Writer.write error_log str in
+  let process_error t e = match t with
+    | Fatal ->
+      if Ivar.is_empty error_occurred then
+        (let str = "\n\n------------------ Benchmark terminated -----------------------\n\n" in
+         Writer.write stderr str;
+         Writer.write error_log str);
+      Ivar.fill_if_empty error_occurred ();
+      let str = "Fatal benchmarking error: " ^ Error.to_string_hum e ^ "\n" in
+      Writer.write stderr str;
+      Writer.write error_log str
+    | NonFatal ->
+      let str = "Non-fatal benchmarking error: " ^ Error.to_string_hum e ^ "\n" in
+      Writer.write stderr str;
+      Writer.write error_log str
+  in
   let writer = Pipe.create_writer @@ fun r ->
-    Pipe.iter r ~f:(fun e ->
-        process_error e;
+    Pipe.iter r ~f:(fun (t, e) ->
+        process_error t e;
         Deferred.unit) in
   let term_request = ref false in
   let terminate_handler s =
@@ -717,7 +727,7 @@ let error_handler error_log =
       term_request := true;
       Clock.run_after Time.Span.second (fun () -> term_request := false) ()
     | true ->
-      process_error (Error.createf "Termination request received: %s" (Signal.to_string s)) in
+      process_error Fatal (Error.createf "Termination request received: %s" (Signal.to_string s)) in
   Signal.handle [Signal.int] ~f:terminate_handler;
   writer, Ivar.read error_occurred
 
@@ -743,7 +753,7 @@ let commit
         Writer.write stdout ("Pushing benchmark data failed. Retrying in 10 seconds.\n");
         Writer.write stdout (Error.to_string_hum e);
         Clock_ns.after (Time_ns.Span.of_sec 10.) >>= fun () -> loop (retry - 1)
-      end else Pipe.write error_writer e in
+      end else write_error error_writer e in
   Writer.write stdout "\n\nUploading benchmark results\n\n";
   (run_git ~working_dir:data_dir ["add"; "."] >>=? fun out ->
   Writer.write stdout out;
@@ -751,7 +761,7 @@ let commit
     ["commit"; "-m"; ("benchmark data for " ^ benchmark_repo ^ "#" ^ benchmark_commit)] >>|? fun out ->
   Writer.write stdout out) >>= function
   | Ok () -> loop 10
-  | Error e -> Pipe.write error_writer e
+  | Error e -> write_error error_writer e
 
 let alloc_benchers =
   let mk_id =
@@ -828,7 +838,7 @@ let alloc_benchers =
     | Ok () -> Deferred.unit
     | Error e ->
       Pipe.write processor_err (Error.to_string_hum e) >>= fun () ->
-      Pipe.write error_writer e
+      write_error error_writer e
 
 module ResourceManager : sig
   type ('size, 'taken, 'release) t
@@ -951,7 +961,7 @@ type compile_unit_data =
 
 let task_disseminator
     ~alloc_benchers ~request_allocate
-    ~error_occurred ~info_stream ~lemma_time
+    ~error_occurred ~error_writer ~info_stream ~lemma_time
     ~wait_for_data
     ~last_abstract_time =
   let stderr = Writer.pipe @@ Lazy.force Writer.stderr in
@@ -968,7 +978,12 @@ let task_disseminator
      let rec loop () =
        Pipe.read r >>= function
        | `Eof -> assert false
-       | `Ok (Return _lemma) -> Deferred.unit
+       | `Ok (Return lemma) ->
+         write_error ~fatality:NonFatal error_writer
+           (Error.createf "Skipping %i lemmas after failure of lemma %s"
+              (String.Map.length !lemmas) lemma) >>| fun () ->
+         String.Map.iter !lemmas ~f:(fun release -> release ());
+         lemmas := String.Map.empty
        | `Ok (ShouldBench (deadline, lemma, ivar)) ->
          match time_remaining deadline, String.Map.find !lemmas lemma with
          | _, None | false, _ ->
@@ -1098,14 +1113,14 @@ let main
   (if resume then
      Sys.file_exists (data_dir/"combined.bench") >>= function
      | `No | `Unknown ->
-       Pipe.write error_writer (Error.of_string "No existing benchmark could be found to resume") >>| fun () ->
+       write_error error_writer (Error.of_string "No existing benchmark could be found to resume") >>| fun () ->
        None
      | `Yes ->
        Reader.file_lines (data_dir/"combined.bench") >>= fun lines ->
        let already_done = List.filter_map ~f:(fun line ->
            Option.bind ~f:List.hd @@ List.tl @@ String.split ~on:'\t' line) lines in
        (if List.is_empty already_done then
-         Pipe.write error_writer (Error.of_string "The previous benchmark was empty, nothing to resume")
+         write_error error_writer (Error.of_string "The previous benchmark was empty, nothing to resume")
          else Deferred.unit) >>| fun () ->
        Some (`Exclude_list already_done)
    else
@@ -1146,7 +1161,7 @@ let main
                          String.concat ~sep:" " args);
            let rec loop i =
              Process.run ~prog ~args () >>= function
-             | Error e -> if i = 0 then Pipe.write error_writer e else begin
+             | Error e -> if i = 0 then write_error error_writer e else begin
                  Writer.write stdout ("Could not delete " ^ target ^ ":" ^ scratch ^ ". Trying again");
                  Clock.after (Time.Span.of_sec 10.) >>= fun () -> loop (i - 1)
                end
@@ -1190,7 +1205,7 @@ let main
                 let prsync = Process.create ~prog ~args () >>= fun p ->
                   match p with
                   | Error e ->
-                    if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer e
+                    if Deferred.is_determined error_occurred then Deferred.unit else write_error error_writer e
                   | Ok p ->
                     Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
                     Process.collect_output_and_wait p >>= fun Process.Output.{ stderr; exit_status; _ } ->
@@ -1199,8 +1214,8 @@ let main
                     | Error (`Exit_non_zero 24) ->
                       Pipe.write processor_err stderr
                     | Error _ ->
-                      if Deferred.is_determined error_occurred then Deferred.unit else Pipe.write error_writer @@
-                        Error.createf "Rsync failed: %s" stderr
+                      if Deferred.is_determined error_occurred then Deferred.unit else
+                        write_error error_writer @@ Error.createf "Rsync failed: %s" stderr
                 in
                 data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
                     | None -> assert false
@@ -1272,7 +1287,7 @@ let main
      ~final_data_prefix:!data_host_prefix ~final_data_host:!data_host
    >>= function
    | Error e ->
-     Pipe.write error_writer e
+     write_error error_writer e
    | Ok (info_stream, cont) ->
      (* Filter out a super-annoying special case in coq-gappa where a Coq file is being generated and promptly
         deleted again. *)
@@ -1312,7 +1327,7 @@ let main
      task_disseminator
        ~alloc_benchers
        ~request_allocate
-       ~error_occurred
+       ~error_occurred ~error_writer
        ~info_stream ~lemma_time
        ~wait_for_data
        ~last_abstract_time >>= fun () ->
