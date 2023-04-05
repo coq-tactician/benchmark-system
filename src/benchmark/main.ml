@@ -304,45 +304,48 @@ let run_processor
        Cmd_worker.Connection.run conn
          ~f:Cmd_worker.functions.process
          ~arg:exec_info >>=? fun r ->
-       Pipe.fold r ~init:(Ok (None, [])) ~f:(fun acc -> function
+       Pipe.fold r ~init:(Ok (`State (None, []))) ~f:(fun acc -> function
            | `Result r ->
              (match acc, r with
-              | Ok (None, all), Should lemma ->
+              | Ok (`State (None, all)), Should lemma ->
                 continue lemma >>=? fun res ->
-                Deferred.Or_error.return @@ (res, all)
-              | Ok (Some lemma', all), Found { lemma; trace; time; witness; inferences } ->
+                Deferred.Or_error.return @@ `State (res, all)
+              | Ok (`State (Some lemma', all)), Found { lemma; trace; time; witness; inferences } ->
                 if String.equal lemma lemma' then
                   Pipe.write reporter { lemma; package
                                       ; result = Some { trace; time; witness; inferences } } >>| fun () ->
-                  Or_error.return (None, lemma::all)
+                  Or_error.return @@ `State (None, lemma::all)
                 else
                   Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
-              | Ok (Some lemma, all), Should lemma' ->
+              | Ok (`State (Some lemma, all)), Should lemma' ->
                 continue lemma' >>=? fun res ->
-                Pipe.write reporter { lemma; package; result = None } >>| fun () -> Ok (res, lemma::all)
+                Pipe.write reporter { lemma; package; result = None } >>| fun () -> Ok (`State (res, lemma::all))
               | Error _ as err, _ -> Deferred.return err
               | _, _ ->
                 Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
              )
            | `Error e ->
              (match acc with
-              | Ok (Some lemma, _) ->
+              | Ok (`State (Some lemma, _)) ->
                 Pipe.write lemma_disseminator (Return lemma)
               | _ -> Deferred.unit) >>= fun () ->
                Pipe.write coq_err (Error.to_string_hum e) >>= fun () -> Deferred.Or_error.fail e
            | `Finished ->
              (match acc with
-              | Ok (Some lemma, _) -> Pipe.write reporter { lemma; package; result = None }
-              | _ -> Deferred.unit) >>| fun () -> acc
+              | Ok (`State (Some lemma, processed)) ->
+                Pipe.write reporter { lemma; package; result = None } >>= fun () ->
+                Deferred.Or_error.return (`Finished (lemma::processed))
+              | Ok (`State (None, processed)) -> Deferred.Or_error.return (`Finished processed)
+              | _ -> Deferred.return acc)
            | `Stdout str -> Pipe.write coq_out str >>| fun () -> acc
            | `Stderr str -> Pipe.write coq_err str >>= fun () -> Pipe.write stderr str >>| fun () -> acc
-         ) >>=? fun (final, processed_lemmas) ->
-       (match final with
-        | None -> Deferred.Or_error.return processed_lemmas
-        | Some lemma ->
+         ) >>=? fun state ->
+       (match state with
+        | `Finished processed_lemmas -> Deferred.Or_error.return processed_lemmas
+        | _ ->
           let exec_str = ("(cd " ^ exec_info.dir ^ " && " ^ exec_info.exec ^ " " ^
                           String.concat ~sep:" " (Array.to_list exec_info.args) ^ ")") in
-          Deferred.Or_error.errorf "Coq process ended abruptly at lemma %s. Invocation: %s" lemma exec_str)
+          Deferred.Or_error.errorf "Coq process ended abruptly. Invocation: %s" exec_str)
        >>=? fun _processed_lemmas ->
        relinquish ();
        loop () in
