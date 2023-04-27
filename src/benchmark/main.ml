@@ -284,6 +284,7 @@ let run_processor
      task_allocator ~prefix ~hostname deadline >>= function
      | `Stop -> Deferred.Or_error.return prev_execs
      | `Task (relinquish, exec_info, lemma_disseminator) ->
+       Monitor.protect ~finally:(fun () -> relinquish (); Deferred.unit) @@ fun () ->
        let package =
          let rec find_package = function
            | [] -> "unknown"
@@ -344,7 +345,6 @@ let run_processor
         | _ ->
           Deferred.Or_error.errorf "Coq process ended abruptly. Invocation: %s" (exec_str exec_info))
        >>=? fun _processed_lemmas ->
-       relinquish ();
        loop (exec_info::prev_execs) in
    with_job ~prefix ~job_name ~hostname loop []) >>=  fun loop_res ->
    Cmd_worker.Connection.close conn >>= fun () ->
