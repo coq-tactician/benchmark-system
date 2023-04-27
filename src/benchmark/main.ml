@@ -28,7 +28,7 @@ type bench_response =
 
 type lemma_disseminator_communication =
   | ShouldBench of (Time_ns.t * string * bench_response Ivar.t)
-  | Return of string
+  | Cancel
 
 type bench_stats =
   { trace : int list
@@ -298,7 +298,7 @@ let run_processor
            ~f:Cmd_worker.functions.continue
            ~arg:res >>= function
            | Error exn ->
-             Pipe.write lemma_disseminator (Return lemma) >>= fun () ->
+             Pipe.write lemma_disseminator Cancel >>= fun () ->
              Deferred.Or_error.fail exn
            | Ok () -> match res with
              | Skip -> Deferred.Or_error.return None
@@ -327,11 +327,8 @@ let run_processor
                 Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
              )
            | `Error e ->
-             (match acc with
-              | Ok (`State (Some lemma, _)) ->
-                Pipe.write lemma_disseminator (Return lemma)
-              | _ -> Deferred.unit) >>= fun () ->
-               Pipe.write coq_err (Error.to_string_hum e) >>= fun () -> Deferred.Or_error.fail e
+             Pipe.write lemma_disseminator Cancel >>= fun () ->
+             Pipe.write coq_err (Error.to_string_hum e) >>= fun () -> Deferred.Or_error.fail e
            | `Finished ->
              (match acc with
               | Ok (`State (Some lemma, processed)) ->
@@ -984,10 +981,10 @@ let task_disseminator
      let rec loop () =
        Pipe.read r >>= function
        | `Eof -> assert false
-       | `Ok (Return lemma) ->
+       | `Ok Cancel ->
          write_error ~fatality:NonFatal error_writer
-           (Error.createf "Skipping %i lemmas after failure of lemma %s"
-              (String.Map.length !lemmas) lemma) >>| fun () ->
+           (Error.createf "Skipping %i lemmas after Coq failure: %s"
+              (String.Map.length !lemmas) (String.concat ~sep:" " @@ String.Map.keys !lemmas)) >>| fun () ->
          String.Map.iter !lemmas ~f:(fun release -> release ());
          lemmas := String.Map.empty
        | `Ok (ShouldBench (deadline, lemma, ivar)) ->
