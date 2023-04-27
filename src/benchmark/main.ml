@@ -627,11 +627,12 @@ let compile_and_retrieve_benchmark_info
       write_error error_writer (Error.of_string "Initial build did not fully complete") >>= fun () ->
       finish
 
-let write_bench_params ~scratch =
+let write_bench_params ~bench_injections_extra ~scratch =
   let (/) = Filename.concat in
   let file_name = scratch/"BenchParams.v" in
+  let data = String.concat ~sep:"\n" ("Set Tactician Benchmark." :: bench_injections_extra) in
   Writer.with_file file_name ~f:(fun w ->
-      Writer.write w "Set Tactician Benchmark."; Deferred.unit)
+      Writer.write w data; Deferred.unit)
   >>| fun () ->
   [| "-l"; file_name |]
 
@@ -1093,6 +1094,7 @@ let filter_lemmas lemma_filter info_stream =
 let main
     ~lemma_filter
     ~injections_extra
+    ~bench_injections_extra
     ~scratch
     ~delay_benchmark
     ~bench_allocator ~compile_allocator ~max_requests ~max_running
@@ -1137,7 +1139,7 @@ let main
    with_log_pipe ~append:resume (data_dir/"processor-err.log") @@ fun processor_err ->
    with_log_writer ~append:resume (data_dir/"combined.bench") @@ fun bench_log ->
    write_injections ~data_dir ~injections_extra >>= fun () ->
-   write_bench_params ~scratch >>= fun extra_args ->
+   write_bench_params ~bench_injections_extra ~scratch >>= fun extra_args ->
 
    let last_abstract_time = Counter.make 1 in
    let self = Unix.gethostname () in
@@ -1456,6 +1458,8 @@ Examples:
      and+ injection_files = flag "inject-file" (listed string)
          ~doc:"file Inject a file containing Coq vernacular into the compilation and benchmarking process. \
                Typically used to specify options. Can be repeated multiple times and combined with -inject-file."
+     and+ bench_injection_string = flag "bench-inject" (listed string)
+         ~doc:"vernacular Same as -inject, but will only be injected while benchmarking, not for initial compilation."
      and+ debug = flag "debug" no_arg
          ~doc:"Show additional debug info on stderr."
      and+ benchmark_data = flag "benchmark-data" (required string)
@@ -1543,6 +1547,7 @@ Examples:
          main
            ~lemma_filter
            ~injections_extra
+           ~bench_injections_extra:bench_injection_string
            ~scratch ~delay_benchmark
            ~bench_allocator ~compile_allocator ~max_requests ~max_running
            ~benchmark_data ~benchmark_target ~benchmark_repo ~benchmark_commit ~lemma_time ~pins ~packages
