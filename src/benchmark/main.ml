@@ -985,9 +985,10 @@ let task_disseminator
        | `Ok Cancel ->
          write_error ~fatality:NonFatal error_writer
            (Error.createf "Skipping %i lemmas after Coq failure: %s"
-              (String.Map.length !lemmas) (String.concat ~sep:" " @@ String.Map.keys !lemmas)) >>| fun () ->
+              (String.Map.length !lemmas) (String.concat ~sep:" " @@ String.Map.keys !lemmas)) >>= fun () ->
          String.Map.iter !lemmas ~f:(fun release -> release ());
-         lemmas := String.Map.empty
+         lemmas := String.Map.empty;
+         loop ()
        | `Ok (ShouldBench (deadline, lemma, ivar)) ->
          match time_remaining deadline, String.Map.find !lemmas lemma with
          | _, None | false, _ ->
