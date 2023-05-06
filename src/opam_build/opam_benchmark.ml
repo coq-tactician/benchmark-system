@@ -47,6 +47,7 @@ let inject ~gt ~st =
     let st = set_opt_switch gt ?st name (`Remove value) in
     set_opt_switch gt ?st name (`Add value) in
   let st = config_add_remove gt ~st "wrap-build-commands" wrap_command in
+  let st = config_add_remove gt ?st "wrap-install-commands" wrap_command in
   let st = config_add_remove gt ?st "pre-build-commands" pre_build_command in
   Option.get st
 
