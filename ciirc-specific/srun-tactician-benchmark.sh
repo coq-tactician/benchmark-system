@@ -15,7 +15,7 @@ TIME=${1}; shift
 PACKAGE=${1}; shift
 
 module use ~/.local/easybuild/modules/all
-module load git bubblewrap OCaml Anaconda3 CapnProto util-linux
+module load GCC git bubblewrap OCaml Anaconda3 CapnProto util-linux
 export OPAMROOT=~/.opam
 eval $(opam env)
 ulimit -n 4096
