@@ -19,6 +19,7 @@ module load git bubblewrap OCaml Anaconda3 CapnProto util-linux
 export OPAMROOT=~/.opam
 eval $(opam env)
 ulimit -n 4096
+ulimit -u 65536
 
 EXIT_CODE=0
 # Run the command on the head node for now. It does not do much anyway

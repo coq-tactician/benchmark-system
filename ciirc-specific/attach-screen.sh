@@ -3,6 +3,9 @@
 set -o pipefail
 set +e
 
+ulimit -n 4096
+ulimit -u 65536
+
 if [ $# -lt 2 ]
 then
     echo "$@"
