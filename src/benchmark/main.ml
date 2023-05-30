@@ -7,14 +7,19 @@ open Async
 type bench_request =
   { lemmas : string list }
 
-type bench_result =
+type proof =
+  { trace : int list
+  ; witness : string }
+[@@deriving bin_io]
+
+type coq_response =
   | Should of string
-  | Found of
+  | Outcome of
       { lemma : string
-      ; trace : int list
       ; time : float
-      ; witness : string
-      ; inferences : int }
+      ; inferences : int
+      ; predictions : int
+      ; proof : proof option }
 [@@deriving bin_io]
 
 type error_type = Fatal | NonFatal
@@ -31,13 +36,13 @@ type lemma_disseminator_communication =
   | Cancel
 
 type bench_stats =
-  { trace : int list
-  ; time : float
-  ; witness : string
-  ; inferences : int }
+  { time : float
+  ; inferences : int
+  ; predictions : int }
 type bench_result_merged =
   { lemma : string
-  ; result : bench_stats option
+  ; stats : bench_stats option
+  ; proof : proof option
   ; package : string }
 
 type exec_info =
@@ -89,7 +94,7 @@ module Cmd_worker = struct
         | `Finished
         | `Stderr of string
         | `Stdout of string
-        | `Result of bench_result ]
+        | `Result of coq_response ]
       [@@deriving bin_io]
     end
     type 'worker functions =
@@ -197,7 +202,7 @@ module Cmd_worker = struct
           let pipes =
             [ Pipe.transfer ~f:(fun m -> `Stdout m) (Reader.pipe stdout) w
             ; Pipe.transfer ~f:(fun m -> `Stderr m) (Reader.pipe stderr) w ] in
-          let messages : bench_result Pipe.Reader.t = Reader.read_all sock_out Reader.read_marshal in
+          let messages : coq_response Pipe.Reader.t = Reader.read_all sock_out Reader.read_marshal in
           let rec loop () =
             Pipe.read messages >>= function
             | `Eof -> Deferred.unit
@@ -208,7 +213,7 @@ module Cmd_worker = struct
                   | `Ok res ->
                     let res = Marshal.to_bytes (res : bench_response) [] in
                     Writer.write_bytes sock_in res; loop ())
-            | `Ok ((Found _) as msg) -> Pipe.write w (`Result msg) >>= fun () -> loop () in
+            | `Ok ((Outcome _) as msg) -> Pipe.write w (`Result msg) >>= fun () -> loop () in
           loop () >>= fun () ->
           Deferred.all_unit pipes >>= fun () ->
           Writer.close sock_in >>= fun () ->
@@ -313,16 +318,18 @@ let run_processor
               | Ok (`State (None, all)), Should lemma ->
                 continue lemma >>=? fun res ->
                 Deferred.Or_error.return @@ `State (res, all)
-              | Ok (`State (Some lemma', all)), Found { lemma; trace; time; witness; inferences } ->
+              | Ok (`State (Some lemma', all)), Outcome { lemma; time; inferences; predictions; proof } ->
                 if String.equal lemma lemma' then
                   Pipe.write reporter { lemma; package
-                                      ; result = Some { trace; time; witness; inferences } } >>| fun () ->
+                                      ; stats = Some { time; inferences; predictions }
+                                      ; proof } >>| fun () ->
                   Or_error.return @@ `State (None, lemma::all)
                 else
                   Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
               | Ok (`State (Some lemma, all)), Should lemma' ->
                 continue lemma' >>=? fun res ->
-                Pipe.write reporter { lemma; package; result = None } >>| fun () -> Ok (`State (res, lemma::all))
+                Pipe.write reporter { lemma; package; stats = None; proof = None } >>| fun () ->
+                Ok (`State (res, lemma::all))
               | Error _ as err, _ -> Deferred.return err
               | _, _ ->
                 Deferred.Or_error.fail (Error.of_string "Coq benchmark protocol error")
@@ -333,7 +340,7 @@ let run_processor
            | `Finished ->
              (match acc with
               | Ok (`State (Some lemma, processed)) ->
-                Pipe.write reporter { lemma; package; result = None } >>= fun () ->
+                Pipe.write reporter { lemma; package; stats = None; proof = None } >>= fun () ->
                 Deferred.Or_error.return (`Finished (lemma::processed))
               | Ok (`State (None, processed)) -> Deferred.Or_error.return (`Finished processed)
               | _ -> Deferred.return acc)
@@ -684,19 +691,21 @@ let reporter ~lemma_time ~info_stream ~bench_log ~resources_requested ~resources
       total := !total + List.length lemmas; Deferred.unit);
   Deferred.upon (Pipe.closed info_stream) (fun () -> complete := true);
   let writer = Pipe.create_writer (fun r ->
-      Pipe.iter r ~f:(fun { lemma; result; package } ->
+      Pipe.iter r ~f:(fun { lemma; stats; proof; package } ->
           processed := !processed + 1;
-          (match result with
-           | None ->
-             Print.fprintf bench_log
-               "%s\t%s\t%d\n"
-               package lemma lemma_time
-           | Some { trace; time; witness; inferences } ->
+          let data = Printf.sprintf "%s\t%s\t%d" package lemma lemma_time in
+          let data = match stats with
+            | None -> data
+            | Some { time; inferences; predictions } ->
+              Printf.sprintf "%s\t%f\t%d\t%d" data time inferences predictions in
+          let data = match proof with
+           | None -> data
+           | Some { trace; witness } ->
              synthesized := !synthesized + 1;
              let trace = String.concat ~sep:"." @@ List.map ~f:string_of_int trace in
-             Print.fprintf bench_log
-               "%s\t%s\t%d\t%s\t%s\t%f\t%d\n"
-               package lemma lemma_time trace witness time inferences);
+             Printf.sprintf "%s\t%s\t%s" data trace witness in
+          let data = data ^ "\n" in
+          Writer.write bench_log data;
           Writer.flushed bench_log
         )) in
   writer, fun () -> Pipe.upstream_flushed writer >>| fun _ -> summarize ()
