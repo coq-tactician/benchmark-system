@@ -538,7 +538,7 @@ let compile_and_retrieve_benchmark_info
     Process.wait p >>| fun _ -> Or_error.errorf "Compile alloc protocol error: Unexpected eof"
   | `Allocated `Ok prefix ->
     Build_worker.spawn_in_foreground
-      ~how:Rpc_parallel.How_to_run.local
+      ~how:(remote_how prefix)
       ~on_failure:(fun e -> don't_wait_for (write_error error_writer e))
       ~shutdown_on:Connection_closed
       ()
