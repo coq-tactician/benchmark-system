@@ -123,7 +123,7 @@ module Cmd_worker = struct
       let hostname =
         C.create_rpc ~f:hostname_impl ~bin_input:Unit.bin_t ~bin_output:String.bin_t ()
 
-      let make_process { exec; args; env; dir } =
+      let make_process { exec=_; args; env; dir } =
         let args = List.tl_exn @@ Array.to_list args in
         let shadow_postfix = ".bench-" ^ Pid.to_string @@ Unix.getpid () in
         let shadow_exts = [".glob"; ".vo"; ".vok"; ".vos"] in
@@ -162,13 +162,13 @@ module Cmd_worker = struct
           (List.map ~f:(fun f ->
                Writer.with_file (f^shadow_postfix) ~f:(fun _ -> Deferred.unit)) to_shadow) >>= fun () ->
         Sys.chdir old_pwd >>= fun () ->
-        let bargs = ["--dev-bind"; "/"; "/"] in
-        let shadow_map = List.map ~f:(fun f -> ["--bind"; f^shadow_postfix; f]) to_shadow in
-        let bargs = bargs @ List.concat shadow_map in
-        let (/) = Filename.concat in
+        (* let bargs = ["--dev-bind"; "/"; "/"] in *)
+        (* let shadow_map = List.map ~f:(fun f -> ["--bind"; f^shadow_postfix; f]) to_shadow in *)
+        (* let bargs = bargs @ List.concat shadow_map in *)
+        (* let (/) = Filename.concat in *)
         let exec =
-          String.chop_suffix_exn exec ~suffix:("lib"/"coq-tactician"/"coqc.real") ^ "bin"/"coqc" in
-        let args = bargs @ [exec] @ args in
+          "coqc" in
+        let args = (* bargs @ *) (* [exec] @ *) args in
         let env =
           List.map ~f:(fun s ->
               match OpamStd.String.cut_at s '=' with
@@ -182,7 +182,7 @@ module Cmd_worker = struct
         let str = String.concat ~sep:"\n" @@ List.map ~f:(function
             | (key, None) -> key ^ "=; export " ^ key ^ ";"
             | (key, Some value) -> key ^ "=" ^ value ^ "; export " ^ key ^ ";") env in
-        let str = str ^ "\n(cd " ^ dir ^ " && " ^ String.concat ~sep:" " ("bwrap"::args) ^ ")" in
+        let str = str ^ "\n(cd " ^ dir ^ " && " ^ String.concat ~sep:" " (args) ^ ")" in
         Process.run
           ~working_dir:dir
           ~prog:"chmod"
@@ -190,7 +190,7 @@ module Cmd_worker = struct
         Spawn_with_socket.create
           ~env:(`Override env)
           ~working_dir:dir
-          ~prog:"bwrap"
+          ~prog:exec
           ~args
           () >>|? fun p -> str, p
 
