@@ -3,6 +3,7 @@ open Opam_build__Opam_benchmark
 open Core
 open Async
 
+
 let main () =
   compile_and_retrieve_benchmark_info
       ~root_dir:"/home/lasse/Documents/Projects/Tactician/benchmark-system/tmp-root"
@@ -25,4 +26,4 @@ let main () =
 let () =
   Command.async ~summary:"Benchmark"
     Command.Let_syntax.(return main)
-  |> Command.run
+  |> Command_unix.run

@@ -20,4 +20,4 @@
    extunix
    core
    async
-  (rpc_parallel (= v0.14.0))))
+  (rpc_parallel (= v0.16.0))))

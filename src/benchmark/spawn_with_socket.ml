@@ -11,7 +11,7 @@ let create_process_internal
     -> prog        : string
     -> argv        : string list
     -> env         : string list
-    -> Core.Unix.Process_info.t
+    -> Core_unix.Process_info.t
   =
   fun ~working_dir ~prog ~argv ~env ->
   let close_on_err = ref [] in
@@ -38,10 +38,10 @@ let create_process_internal
         ()
       |> Pid.of_int
     in
-    Core.Unix.close in_read; Core.Unix.close out_write; Core.Unix.close err_write;
+    Core_unix.close in_read; Core_unix.close out_write; Core_unix.close err_write;
     { pid; stdin = in_write; stdout = out_read; stderr = err_read; }
   with exn ->
-    List.iter !close_on_err ~f:(fun x -> try Core.Unix.close x with _ -> ());
+    List.iter !close_on_err ~f:(fun x -> try Core_unix.close x with _ -> ());
     raise exn
 
 module Execvp_emulation : sig
@@ -144,7 +144,7 @@ end
 
 
 let create_process_env ?working_dir ?prog_search_path ?argv0 ~prog ~args ~env () =
-  let env_assignments = Core.Unix.Env.expand env in
+  let env_assignments = Core_unix.Env.expand env in
   Execvp_emulation.run
     ~prog
     ~args

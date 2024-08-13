@@ -132,7 +132,7 @@ module Cmd_worker = struct
         let check_file cont f =
           let base = Stdlib.Filename.remove_extension f in
           let fs = List.map ~f:(fun ext -> base ^ ext) shadow_exts in
-          Deferred.List.filter ~f:(fun f ->
+          Deferred.List.filter ~how:`Sequential ~f:(fun f ->
               if String.length f > 255 then Deferred.return false else
                 Sys.file_exists f >>| function
                 | `Unknown | `No -> false
@@ -157,7 +157,7 @@ module Cmd_worker = struct
             check_file cont arg
         in
         detect args >>= fun to_shadow ->
-        let to_shadow = List.map ~f:Filename.realpath to_shadow in
+        let to_shadow = List.map ~f:Filename_unix.realpath to_shadow in
         Deferred.all_unit
           (List.map ~f:(fun f ->
                Writer.with_file (f^shadow_postfix) ~f:(fun _ -> Deferred.unit)) to_shadow) >>= fun () ->
@@ -398,10 +398,10 @@ module Build_worker = struct
       type t =
         [ `Info of pre_bench_info
         | `Timings of
-             [ `Total_install_time of Core_kernel.Time_ns.Span.t ] *
-             [ `Target_install_time of Core_kernel.Time_ns.Span.t ] *
-             [ `Deps_install_time of Core_kernel.Time_ns.Span.t ] *
-             [ `Subject_install_time of Core_kernel.Time_ns.Span.t ] ]
+             [ `Total_install_time of Core.Time_ns.Span.t ] *
+             [ `Target_install_time of Core.Time_ns.Span.t ] *
+             [ `Deps_install_time of Core.Time_ns.Span.t ] *
+             [ `Subject_install_time of Core.Time_ns.Span.t ] ]
       [@@deriving bin_io]
     end
     type 'worker functions =
@@ -447,7 +447,7 @@ module Build_worker = struct
            ; ["remote"; "add"; "origin"; repo]
            ; ["fetch"; "--depth"; "1"; "origin"; commit]
            ; ["checkout"; "FETCH_HEAD"]] in
-         (Deferred.Or_error.List.iter cmds ~f:(fun args ->
+         (Deferred.Or_error.List.iter ~how:`Sequential cmds ~f:(fun args ->
               run_git ~working_dir:dir args >>|? fun _ -> ())) >>=? fun () ->
          let prereq_file = Filename.concat dir "prerequisites" in
          (Sys.file_exists prereq_file >>= function
@@ -529,11 +529,11 @@ let compile_and_retrieve_benchmark_info
   Ivar.fill stop_clock ();
   match line with
   | `Aborted ->
-    Signal.send_i Signal.int (`Group (Process.pid p));
+    Signal_unix.send_i Signal.int (`Group (Process.pid p));
     pipe >>= fun () -> Writer.close (Process.stdin p) >>= fun () -> Reader.close (Process.stdout p) >>= fun () ->
     Process.wait p >>| fun _ -> Or_error.errorf "Aborted before initial compilation could start"
   | `Allocated `Eof ->
-    Signal.send_i Signal.int (`Group (Process.pid p));
+    Signal_unix.send_i Signal.int (`Group (Process.pid p));
     pipe >>= fun () -> Writer.close (Process.stdin p) >>= fun () -> Reader.close (Process.stdout p) >>= fun () ->
     Process.wait p >>| fun _ -> Or_error.errorf "Compile alloc protocol error: Unexpected eof"
   | `Allocated `Ok prefix ->
@@ -738,7 +738,7 @@ let error_handler error_log =
     | false ->
       Writer.write stderr "Termination request received. Repeat within a second to confirm.\n";
       term_request := true;
-      Clock.run_after Time.Span.second (fun () -> term_request := false) ()
+      Clock.run_after Time_float_unix.Span.second (fun () -> term_request := false) ()
     | true ->
       process_error Fatal (Error.createf "Termination request received: %s" (Signal.to_string s)) in
   Signal.handle [Signal.int] ~f:terminate_handler;
@@ -807,14 +807,14 @@ let alloc_benchers =
      | `Aborted ->
        relinquish_alloc_token ();
        relinquish_running_token ();
-       Signal.send_i Signal.int (`Group (Process.pid p));
+       Signal_unix.send_i Signal.int (`Group (Process.pid p));
        Deferred.List.all_unit pipe >>= fun () ->
        Writer.close (Process.stdin p) >>= fun () -> Reader.close (Process.stdout p) >>= fun () ->
        Process.wait p >>| fun _ -> Or_error.return ()
      | `Allocated `Eof ->
        relinquish_alloc_token ();
        relinquish_running_token ();
-       Signal.send_i Signal.int (`Group (Process.pid p));
+       Signal_unix.send_i Signal.int (`Group (Process.pid p));
        error_if_not_aborted @@ Error.createf "Alloc protocol error: Unexpected eof"
      | `Allocated `Ok time ->
        (match int_of_string_opt time with
@@ -994,28 +994,28 @@ let task_disseminator
        | `Ok Cancel ->
          write_error ~fatality:NonFatal error_writer
            (Error.createf "Skipping %i lemmas after Coq failure: %s"
-              (String.Map.length !lemmas) (String.concat ~sep:" " @@ String.Map.keys !lemmas)) >>= fun () ->
-         String.Map.iter !lemmas ~f:(fun release -> release ());
+              (Map.length !lemmas) (String.concat ~sep:" " @@ Map.keys !lemmas)) >>= fun () ->
+         Map.iter !lemmas ~f:(fun release -> release ());
          lemmas := String.Map.empty;
          loop ()
        | `Ok (ShouldBench (deadline, lemma, ivar)) ->
-         match time_remaining deadline, String.Map.find !lemmas lemma with
+         match time_remaining deadline, Map.find !lemmas lemma with
          | _, None | false, _ ->
            Ivar.fill ivar Skip;
            loop ()
          | true, Some release ->
            Ivar.fill ivar (Bench lemma_time);
-           lemmas := String.Map.remove !lemmas lemma;
+           lemmas := Map.remove !lemmas lemma;
            release ();
            loop () in
      loop ()
-    ), (fun () -> String.Map.length !lemmas) in
+    ), (fun () -> Map.length !lemmas) in
   let task_receiver = Pipe.iter_without_pushback info_stream
     ~f:(fun ({exec; args; env; dir; lemmas; time=_ } : pre_bench_info) ->
          let lemmas = List.map lemmas ~f:(fun l ->
              l, Staged.unstage @@ ResourceManager.add_work lemma_token_queue) in
          let lemmas = String.Map.of_alist_exn lemmas in
-         if not @@ String.Map.is_empty lemmas then
+         if not @@ Map.is_empty lemmas then
            let lemma_disseminator, lemma_count = lemma_disseminator lemmas in
            Counter.increase last_abstract_time;
            data := { exec_info = { exec; args; env; dir }
@@ -1081,16 +1081,16 @@ let filter_lemmas lemma_filter info_stream =
    | None -> Deferred.return (fun _ -> true)
    | Some (`Include file) ->
      mk_lemma_set file >>| fun lemmas ->
-     fun lemma -> String.Set.mem lemmas lemma
+     fun lemma -> Set.mem lemmas lemma
    | Some (`Include_list lemmas) ->
      let lemmas = String.Set.of_list lemmas in
-     return (fun lemma -> String.Set.mem lemmas lemma)
+     return (fun lemma -> Set.mem lemmas lemma)
    | Some (`Exclude file) ->
      mk_lemma_set file >>| fun lemmas ->
-     fun lemma -> not @@ String.Set.mem lemmas lemma
+     fun lemma -> not @@ Set.mem lemmas lemma
    | Some (`Exclude_list lemmas) ->
      let lemmas = String.Set.of_list lemmas in
-     return (fun lemma -> not @@ String.Set.mem lemmas lemma)
+     return (fun lemma -> not @@ Set.mem lemmas lemma)
    | Some (`IncludeRegexp regexp) ->
      let regexp = Str.regexp regexp in
      return (fun lemma -> Str.string_match regexp lemma 0)
@@ -1178,7 +1178,7 @@ let main
              Process.run ~prog ~args () >>= function
              | Error e -> if i = 0 then write_error error_writer e else begin
                  Writer.write stdout ("Could not delete " ^ target ^ ":" ^ scratch ^ ". Trying again");
-                 Clock.after (Time.Span.of_sec 10.) >>= fun () -> loop (i - 1)
+                 Clock.after (Time_float_unix.Span.of_sec 10.) >>= fun () -> loop (i - 1)
                end
              | Ok _out -> Deferred.unit in
            loop 10)
@@ -1222,7 +1222,7 @@ let main
                   | Error e ->
                     if Deferred.is_determined error_occurred then Deferred.unit else write_error error_writer e
                   | Ok p ->
-                    Deferred.upon error_occurred (fun () -> Signal.send_i Signal.int (`Pid (Process.pid p)));
+                    Deferred.upon error_occurred (fun () -> Signal_unix.send_i Signal.int (`Pid (Process.pid p)));
                     Process.collect_output_and_wait p >>= fun Process.Output.{ stderr; exit_status; _ } ->
                     match exit_status with
                     | Ok () -> return ()
@@ -1232,7 +1232,7 @@ let main
                       if Deferred.is_determined error_occurred then Deferred.unit else
                         write_error error_writer @@ Error.createf "Rsync failed: %s" stderr
                 in
-                data_host_rsyncs_active := String.Map.update !data_host_rsyncs_active data_host ~f:(function
+                data_host_rsyncs_active := Map.update !data_host_rsyncs_active data_host ~f:(function
                     | None -> assert false
                     | Some m -> prsync >>= fun _ -> m);
                 prsync
@@ -1257,31 +1257,31 @@ let main
        | Some (_, t) -> wait_for_time t in
    let copier = if shared_filesystem then fun _ _ _ -> Deferred.unit else copier in
    let add_job ~job_name ~hostname =
-     hosts := String.Map.update !hosts hostname ~f:(function
+     hosts := Map.update !hosts hostname ~f:(function
          | None -> { jobs = String.Set.singleton job_name
                    ; wait_for_data = copier hostname }
-         | Some ({ jobs; _ } as data) -> { data with jobs = String.Set.add jobs job_name });
+         | Some ({ jobs; _ } as data) -> { data with jobs = Set.add jobs job_name });
    in
    let remove_job ~prefix ~job_name ~hostname =
-     let { jobs; wait_for_data } = String.Map.find_exn !hosts hostname in
-     let jobs = String.Set.remove jobs job_name in
-     hosts := String.Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
-     if String.Set.is_empty jobs then wait_for_data prefix None else Deferred.unit in
+     let { jobs; wait_for_data } = Map.find_exn !hosts hostname in
+     let jobs = Set.remove jobs job_name in
+     hosts := Map.set !hosts ~key:hostname ~data:{ jobs; wait_for_data };
+     if Set.is_empty jobs then wait_for_data prefix None else Deferred.unit in
    let with_job ~prefix ~job_name ~hostname f x =
      add_job ~job_name ~hostname;
      Monitor.protect ~finally:(fun () ->
          remove_job ~prefix ~job_name ~hostname)
        (fun () -> f x) in
    let wait_for_data ~prefix ~full ~hostname ~time =
-     (String.Map.find_exn !hosts hostname).wait_for_data prefix (Some (full, time)) in
+     (Map.find_exn !hosts hostname).wait_for_data prefix (Some (full, time)) in
    let switch_data_host ~new_prefix ~new_host =
      let old_host = !data_host in
      wait_for_data ~prefix:new_prefix ~full:true ~hostname:new_host ~time:(Counter.count last_abstract_time)
      >>= fun () ->
-     data_host_rsyncs_active := String.Map.set !data_host_rsyncs_active ~key:new_host ~data:Deferred.unit;
+     data_host_rsyncs_active := Map.set !data_host_rsyncs_active ~key:new_host ~data:Deferred.unit;
      data_host := new_host;
      data_host_prefix := new_prefix;
-     String.Map.find_exn !data_host_rsyncs_active old_host in
+     Map.find_exn !data_host_rsyncs_active old_host in
 
    (* This job is running the entire session *)
    let main_job = "main_job" in
@@ -1386,7 +1386,7 @@ let with_temp parent cont =
   | Error e -> raise e
 
 let compile_injection_string ~injection_strings ~injection_files =
-  Deferred.List.concat_map ~f:Reader.file_lines injection_files >>| fun file_lines ->
+  Deferred.List.concat_map ~how:`Sequential ~f:Reader.file_lines injection_files >>| fun file_lines ->
   file_lines@injection_strings
 
 let command =
@@ -1544,12 +1544,12 @@ Examples:
           | Some (`Tmp tmp) ->
             (Sys.file_exists tmp >>= function
               | `No | `Unknown -> Deferred.return @@ fun _ -> Deferred.Or_error.error_string "Supplied tmp directory does not exist"
-              | `Yes -> Deferred.return @@ with_temp (Filename.realpath tmp)
+              | `Yes -> Deferred.return @@ with_temp (Filename_unix.realpath tmp)
             )
           | Some (`Build build) ->
             (Sys.file_exists build >>= function
               | `No | `Unknown -> Deferred.return @@ fun _ -> Deferred.Or_error.error_string "Supplied build directory does not exist"
-              | `Yes -> Deferred.return @@ fun cont -> cont (Filename.realpath build)))
+              | `Yes -> Deferred.return @@ fun cont -> cont (Filename_unix.realpath build)))
          >>= fun with_scratch -> with_scratch @@ fun scratch ->
          print_endline ("Scratch directory: " ^ scratch);
          List.iter ~f:print_endline packages;
@@ -1567,21 +1567,21 @@ Examples:
 let () =
   match Rpc_parallel__.Utils.whoami () with
   | `Master ->
-    (match Core.Unix.fork () with
+    (match Core_unix.fork () with
      | `In_the_child ->
        ExtUnix.Specific.setpgid 0 0;
-       Rpc_parallel.start_app command
+       Rpc_parallel_unauthenticated.start_app command
      | `In_the_parent child ->
        let handler s =
-         match Core.Signal.send s (`Pid child) with
+         match Signal_unix.send s (`Pid child) with
          | `Ok -> ()
          | `No_such_process -> () in
-       let signals_to_forward = [Core.Signal.int; Core.Signal.hup; Core.Signal.term; Core.Signal.quit] in
+       let signals_to_forward = [Signal.int; Signal.hup; Signal.term; Signal.quit] in
        List.iter ~f:(fun s -> Core.Signal.Expert.handle s handler) signals_to_forward;
-       match Core.Unix.waitpid child with
+       match Core_unix.waitpid child with
        | Ok () -> ()
        | Error (`Exit_non_zero i) -> Core.exit i
        | Error (`Signal _) -> Core.exit 1 (* TODO: Proper way of handling this? *)
     );
   | `Worker ->
-    Rpc_parallel.start_app command
+    Rpc_parallel_unauthenticated.start_app command

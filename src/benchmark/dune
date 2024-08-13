@@ -1,7 +1,7 @@
 (executable
  (public_name tactician-benchmark)
  (name main)
- (libraries str extunix core async rpc_parallel opam_build)
+ (libraries str extunix core core_unix.command_unix core_unix.filename_unix core_unix.signal_unix core_unix.time_unix async rpc_parallel rpc_parallel.unauthenticated opam_build)
  (modules main arg_parser spawn_with_socket)
  (preprocess (pps ppx_jane)))
 
@@ -16,5 +16,5 @@
  (name opam_build)
  (modules opam_build)
  (libraries
-   core async opam_build)
+   core core_unix.command_unix async opam_build)
 )
