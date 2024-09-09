@@ -114,10 +114,10 @@ let build_switch_for_benchmark
     let every_root_package = packages @ [target_name, None; tactician_package, None] in
     let every_package =
       let request = OpamSolver.request ~install:every_root_package () in
+      let requested = OpamFormula.packages_of_atoms st.packages every_root_package in
       let solution =
         OpamSolution.resolve st Install
-          ~orphans:OpamPackage.Set.empty
-          ~requested:(OpamPackage.Name.Set.of_list @@ List.map fst every_root_package)
+          ~requested:requested
           request in
       match solution with
       | OpamTypes.Success s -> OpamSolver.new_packages s
@@ -144,12 +144,13 @@ let build_switch_for_benchmark
        (Not so on newer versions of Coq, because the package is not needed). If so, it will be pre-installed. *)
     let not_coq_dependees = not_coq_dependees @
       if List.exists (OpamPackage.Name.equal tactician_stdlib_package) @@ List.map fst packages then [] else
+        let atoms = [target_name, None; tactician_package, None; tactician_stdlib_package, None] in
         let request = OpamSolver.request
-            ~install:[target_name, None; tactician_package, None; tactician_stdlib_package, None] () in
+            ~install:atoms () in
+        let requested = OpamFormula.packages_of_atoms st.packages every_root_package in
         let stdlib_installable =
           OpamSolution.resolve st Install
-            ~orphans:OpamPackage.Set.empty
-            ~requested:(OpamPackage.Name.Set.of_list [target_name; tactician_package; tactician_stdlib_package])
+            ~requested:requested
             request in
         match stdlib_installable with
         | OpamTypes.Success _ ->

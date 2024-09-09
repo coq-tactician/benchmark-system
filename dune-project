@@ -15,7 +15,7 @@
   (ocaml (>= 4.12.0))
    dune
   (dune-site (>= 2.9.1))
-  (opam-client (and (>= 2.1.0) (< 2.2.0)))
+  (opam-client (and (>= 2.2.0) (< 2.3.0)))
    conf-git
    extunix
    core
