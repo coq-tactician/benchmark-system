@@ -177,6 +177,9 @@ module Cmd_worker = struct
                 if String.equal key "PATH" then
                   key, Some (Option.value ~default:""
                                (Option.map ~f:(fun p -> p^":") @@ Unix.getenv "PATH_EXTRA") ^ value)
+                (* Dune has its own TMPDIR which is later deleted. Reset to the original *)
+                else if String.equal key "TMP" then "TMP", Unix.getenv "TMP"
+                else if String.equal key "TMPDIR" then "TMPDIR", Unix.getenv "TMPDIR"
                 else key, Some value
             ) @@ Array.to_list env in
         let str = String.concat ~sep:"\n" @@ List.map ~f:(function
